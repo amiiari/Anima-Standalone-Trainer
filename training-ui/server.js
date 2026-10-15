@@ -653,6 +653,8 @@ app.post('/api/jobs', (req, res) => {
 
         // Copy template configs
         const { config, useFallback } = getDefaultConfig();
+        // LoRA files are named after the job (not the template's placeholder)
+        if (config.training_arguments) config.training_arguments.output_name = safeName.split('/').pop();
         fs.writeFileSync(path.join(jobPath, 'config.toml'), TOML.stringify(config), 'utf8');
 
         const datasetConfig = getDefaultDataset();
