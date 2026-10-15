@@ -88,6 +88,7 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
     }
 
     // Hardlinks checkpoints into Forge's Lora folder (_trainer/<job>/) so <lora:name:w> resolves.
+    // Only for the duration of a render pass (unlinkCheckpoints after), so Forge's LoRA list stays yours.
     async function linkCheckpoints(job, ckpts) {
         const dst = path.join(await forgeLoraDir(), '_trainer', sanitizeName(job));
         fs.mkdirSync(dst, { recursive: true });
@@ -100,6 +101,13 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
             changed = true;
         }
         if (changed) await forge('/sdapi/v1/refresh-loras', {});
+    }
+
+    async function unlinkCheckpoints() {
+        const dir = path.join(await forgeLoraDir(), '_trainer');
+        if (!fs.existsSync(dir)) return;
+        fs.rmSync(dir, { recursive: true, force: true }); // hardlinks: the job's own files are untouched
+        await forge('/sdapi/v1/refresh-loras', {});
     }
 
     function renderPath(job, id, ckpt) {
@@ -155,6 +163,14 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
         st.total = todo.length;
         if (!todo.length) return;
         await linkCheckpoints(job, ckpts);
+        try {
+            await renderAll(job, cfg, todo, st);
+        } finally {
+            await unlinkCheckpoints().catch(e => console.error('[compare] unlink:', e.message));
+        }
+    }
+
+    async function renderAll(job, cfg, todo, st) {
         for (const { s, c, out } of todo) {
             if (st.stop) return;
             st.label = `${c.name === BASE ? 'No LoRA' : c.name} · sample ${cfg.samples.indexOf(s) + 1}`;

@@ -522,6 +522,7 @@ function populateConfig(config) {
   $("cfg-sample-every").value = sampleInterval || 1;
   $("cfg-sample-every-steps").value = sampleIntervalSteps || 100;
   $("group-sample-every").classList.toggle("hidden", !enableSampling);
+  syncSamplingTabs();
   // Anima
   $("cfg-timestep-method").value = a.timestep_sample_method || "logit_normal";
   $("cfg-flow-shift").value = a.discrete_flow_shift ?? 3.0;
@@ -2600,7 +2601,17 @@ function syncCompareFrames() {
 // ==========================================
 $("cfg-enable-sampling").addEventListener("change", (e) => {
   $("group-sample-every").classList.toggle("hidden", !e.target.checked);
+  syncSamplingTabs();
 });
+// Samples/Prompts tabs belong to the built-in sampler; hide them while it's off (the Compare tab replaces them)
+function syncSamplingTabs() {
+  const on = $("cfg-enable-sampling").checked;
+  for (const name of ["samples", "prompts"]) {
+    const tab = document.querySelector(`.tab[data-tab="${name}"]`);
+    tab.classList.toggle("hidden", !on);
+    if (!on && tab.classList.contains("active")) document.querySelector('.tab[data-tab="training"]').click();
+  }
+}
 document.querySelectorAll('input[name="duration-unit"]').forEach((el) => {
   el.addEventListener("change", updateDurationUnit);
 });
@@ -3463,7 +3474,7 @@ async function init() {
   const lastTab = localStorage.getItem("lastTab");
   if (lastTab && currentJob) {
     const tabEl = document.querySelector(`.tab[data-tab="${lastTab}"]`);
-    if (tabEl) tabEl.click();
+    if (tabEl && !tabEl.classList.contains("hidden")) tabEl.click();
   }
   // 3. Sync Settings: Load from server and refresh cache
   const globalConfig = await api("/api/global-config");

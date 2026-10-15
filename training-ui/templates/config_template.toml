@@ -10,6 +10,8 @@ log_with = "tensorboard"
 learning_rate = 1e-4
 text_encoder_lr = 5e-5
 optimizer_type = "AdamW8bit"
+validate_on_train_images = true
+max_validation_steps = 8
 optimizer_args = [ "weight_decay=0.01",]
 lr_scheduler = "cosine"
 lr_warmup_steps = 0
