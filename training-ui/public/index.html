@@ -49,8 +49,7 @@
                 <!-- Jobs rendered here -->
             </div>
             <div class="sidebar-footer">
-                <a href="compare.html" class="btn btn-ghost btn-block">🖼️ Compare Epochs</a>
-                <button id="btn-global-settings" class="btn btn-ghost btn-block">⚙️ Global Settings</button>
+                                <button id="btn-global-settings" class="btn btn-ghost btn-block">⚙️ Global Settings</button>
             </div>
         </aside>
 
@@ -82,6 +81,7 @@
                     <button class="tab" data-tab="network">Network</button>
                     <button class="tab" data-tab="multigpu">Multi-GPUs</button>
                     <button class="tab" data-tab="prompts">Prompts</button>
+                    <button class="tab" data-tab="compare">🖼️ Compare</button>
                     <button class="tab" data-tab="samples">Samples</button>
                     <button class="tab" data-tab="console">Console</button>
                     <button class="tab" data-tab="tensorboard">📊 TensorBoard</button>
@@ -360,8 +360,7 @@
                                 <input type="text" id="cfg-caption-ext" value=".txt" placeholder=".txt">
                             </div>
                             <div class="form-group">
-                                <label title="Holds out this fraction of images and logs a fixed-seed validation loss every epoch (loss/validation/epoch_average in TensorBoard). Lowest point = least overfit checkpoint. 0 = off.">Validation Split</label>
-                                <input type="number" id="cfg-validation-split" value="0.15" min="0" max="0.5" step="0.05">
+                                <label title="Each epoch, scores a fixed set of your training images at fixed seeds/timesteps (nothing is held out). Shows up as the loss indicator on the Compare tab: a smooth curve that flattens when the LoRA stops learning."><input type="checkbox" id="cfg-loss-indicator" checked> Loss indicator</label>
                             </div>
                         </div>
 
@@ -927,12 +926,18 @@
                         </div>
                     </div>
 
+                    <!-- Compare Tab (Forge renders per epoch + loss chart) -->
+                    <div id="tab-compare" class="tab-pane hidden">
+                        <iframe id="compare-iframe" title="Compare epochs" style="width:100%; height:calc(100vh - 150px); border:0; display:block"></iframe>
+                    </div>
+
                     <!-- Console Tab -->
                     <div id="tab-console" class="tab-pane hidden">
                         <div class="console-header">
                             <h4>Training Console</h4>
                             <button id="btn-clear-console" class="btn btn-ghost btn-sm">Clear</button>
                         </div>
+                        <iframe id="console-chart" title="Loss chart" style="width:100%; height:330px; border:0; display:block; margin-bottom:8px"></iframe>
                         <pre id="console-output" class="console-output">Waiting for training to start...</pre>
                     </div>
 

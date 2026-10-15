@@ -297,6 +297,7 @@ async function selectJob(name) {
     lastSavedDataset = JSON.parse(JSON.stringify(gatherDataset()));
     lastSavedPrompts = JSON.parse(JSON.stringify(currentPrompts));
     lastSavedNegativePrompt = $("global-negative-prompt").value;
+    syncCompareFrames();
     // Subscribe WS
     subscribeToJob(name);
     // Reset console
@@ -341,6 +342,7 @@ function populateConfig(config) {
   $("cfg-learning-rate").value = t.learning_rate || "5e-5";
   $("cfg-text-encoder-lr").value = t.text_encoder_lr || "5e-5";
   $("cfg-optimizer").value = t.optimizer_type || "AdamW8bit";
+  $("cfg-loss-indicator").checked = t.validate_on_train_images ?? true;
   $("cfg-lr-scheduler").value = t.lr_scheduler || "cosine";
   $("cfg-lr-warmup").value = t.lr_warmup_steps ?? 100;
   $("cfg-lr-scheduler-cycles").value = t.lr_scheduler_num_cycles ?? 1;
@@ -546,7 +548,6 @@ function populateDataset(dataset) {
 
   const d = dArray[0];
   $("cfg-caption-ext").value = d.caption_extension || ".txt";
-  $("cfg-validation-split").value = d.validation_split ?? 0.15;
   $("cfg-enable-bucket").checked = g.enable_bucket ?? true;
   $("cfg-bucket-no-upscale").checked = g.bucket_no_upscale ?? true;
   $("cfg-min-bucket").value = g.min_bucket_reso ?? 512;
@@ -665,6 +666,9 @@ function gatherConfig() {
       learning_rate: safeFloat($("cfg-learning-rate").value),
       text_encoder_lr: safeFloat($("cfg-text-encoder-lr").value),
       optimizer_type: $("cfg-optimizer").value,
+      // cap the per-epoch check at 8 fixed batches (x4 timesteps)
+      validate_on_train_images: $("cfg-loss-indicator").checked || undefined,
+      max_validation_steps: $("cfg-loss-indicator").checked ? 8 : undefined,
       optimizer_args: optimizerArgs.length > 0 ? optimizerArgs : undefined,
       lr_scheduler: $("cfg-lr-scheduler").value,
       lr_scheduler_num_cycles:
@@ -849,7 +853,6 @@ function gatherDataset() {
           resolution: [r, r],
           batch_size: b,
           caption_extension: $("cfg-caption-ext").value,
-          validation_split: safeFloat($("cfg-validation-split").value) || undefined,
           subsets: currentSubsets.map((s) => {
             const subset = {
               image_dir: s.image_dir,
@@ -2563,8 +2566,22 @@ document.querySelectorAll(".tab").forEach((tab) => {
     }
     if (tab.dataset.tab === "prompts") loadPrompts();
     if (tab.dataset.tab === "tensorboard") checkTensorBoard();
+    syncCompareFrames();
   });
 });
+// Compare tab + console loss chart are compare.html in iframes; point them at the current job
+// (only while visible, so hidden tabs don't poll)
+function syncCompareFrames() {
+  const frames = [
+    ["compare-iframe", "tab-compare", ""],
+    ["console-chart", "tab-console", "&view=chart"],
+  ];
+  for (const [id, pane, extra] of frames) {
+    const want = currentJob && !$(pane).classList.contains("hidden")
+      ? `compare.html?job=${encodeURIComponent(currentJob)}${extra}` : "about:blank";
+    if ($(id).getAttribute("src") !== want) $(id).setAttribute("src", want);
+  }
+}
 // Global tab switching and sync buttons are now handled
 // dynamically inside buildGlobalSettingsTabs()
 // ==========================================

@@ -11,252 +11,481 @@
         if (t) document.documentElement.setAttribute('data-theme', t);
     </script>
     <style>
-        :root { --s-val: #3987e5; --s-train: #d95926; }
-        [data-theme="github-light"] { --s-val: #2a78d6; --s-train: #eb6834; }
+        :root { --s-check: #3987e5; --s-train: #d95926; }
+        [data-theme="github-light"] { --s-check: #2a78d6; --s-train: #eb6834; }
         body { background: var(--bg-primary); color: var(--text-primary); overflow: auto; }
-        .wrap { max-width: 1400px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
-        .panel { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
-        .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+        .wrap { padding: 12px; display: grid; gap: 12px; }
+        .panel { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; }
+        .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
         .row .form-group { margin: 0; }
-        #drop { border: 2px dashed var(--border); border-radius: var(--radius); padding: 24px; text-align: center; cursor: pointer; color: var(--text-secondary); }
-        #drop.over { border-color: var(--accent); color: var(--accent); }
-        #drop img { max-height: 260px; max-width: 100%; display: block; margin: 0 auto 8px; border-radius: 6px; }
-        textarea { width: 100%; min-height: 70px; font-family: inherit; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
-        .card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-        .card.best { border-color: var(--success); }
-        .card header { padding: 8px 10px; display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
-        .card header span { color: var(--text-secondary); }
-        .card .img { aspect-ratio: 2/3; display: grid; place-items: center; color: var(--text-muted); font-size: 13px; background: var(--bg-tertiary); }
-        .card img { width: 100%; display: block; cursor: zoom-in; }
-        #chart { width: 100%; height: 260px; display: block; }
+        .muted { color: var(--text-secondary); font-size: 13px; }
+        .err { color: var(--danger); font-size: 13px; }
+        .banner { border-color: var(--warning); }
+        textarea { width: 100%; min-height: 64px; font-family: inherit; }
+        input[type=number] { width: 80px; }
+        button:disabled { opacity: .45; cursor: default; }
+
+        /* sample strip */
+        .strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+        .thumb { position: relative; flex: 0 0 auto; width: 84px; height: 112px; border: 2px solid var(--border); border-radius: 6px; overflow: hidden; cursor: pointer; background: var(--bg-tertiary); }
+        .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .thumb.sel { border-color: var(--accent); }
+        .thumb .x { position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,.6); color: #fff; border: 0; border-radius: 4px; width: 20px; height: 20px; cursor: pointer; line-height: 18px; }
+        .thumb .tag { position: absolute; bottom: 0; left: 0; right: 0; font-size: 10px; background: rgba(0,0,0,.6); color: #fff; padding: 1px 4px; }
+        .add { display: grid; place-items: center; text-align: center; font-size: 12px; color: var(--text-secondary); border-style: dashed; }
+        .add.over, #template.over { border-color: var(--accent); color: var(--accent); }
+
+        /* viewer */
+        .viewer { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 12px; }
+        @media (max-width: 900px) { .viewer { grid-template-columns: 1fr; } }
+        .epochbar { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+        .epochbar input[type=range] { flex: 1; }
+        .epochbar .lbl { min-width: 190px; text-align: right; font-variant-numeric: tabular-nums; }
+        .wipe { position: relative; user-select: none; cursor: ew-resize; background: var(--bg-tertiary); border-radius: 6px; overflow: hidden; min-height: 300px; display: grid; place-items: center; touch-action: none; }
+        .wipe img { display: block; max-width: 100%; max-height: 62vh; pointer-events: none; }
+        .wipe .right { position: absolute; inset: 0; display: grid; place-items: center; }
+        .wipe .divider { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 4px rgba(0,0,0,.6); pointer-events: none; }
+        .wipe .corner { position: absolute; top: 8px; font-size: 12px; background: rgba(0,0,0,.65); color: #fff; padding: 2px 8px; border-radius: 4px; pointer-events: none; }
+        .wipe .empty { color: var(--text-muted); font-size: 13px; padding: 40px; text-align: center; }
+
+        /* chart */
+        #chart { width: 100%; height: 240px; display: block; }
         #chart text { fill: var(--text-secondary); font-size: 11px; }
-        .legend { display: flex; gap: 16px; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; }
+        .legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); flex-wrap: wrap; }
         .legend i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 6px; }
         #tip { position: fixed; pointer-events: none; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; display: none; z-index: 10; }
-        #status { color: var(--text-secondary); font-size: 13px; }
-        details summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; margin-top: 8px; }
-        table { border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+        table { border-collapse: collapse; font-size: 12px; }
         td, th { padding: 2px 12px 2px 0; text-align: left; }
+
+        /* dataset picker */
+        dialog { width: min(1100px, 95vw); max-height: 85vh; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius); }
+        dialog::backdrop { background: rgba(0,0,0,.6); }
+        .pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+        .pick img { width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 4px; cursor: pointer; border: 2px solid transparent; }
+        .pick img:hover { border-color: var(--accent); }
+
+        body.chart-only .wrap > :not(#loss-panel) { display: none; }
     </style>
 </head>
 
 <body>
     <div class="wrap">
-        <div class="row" style="justify-content: space-between; align-items: center;">
-            <h2 style="margin:0">Compare Epochs in Forge</h2>
-            <a href="/" class="btn btn-ghost btn-sm">← Back to trainer</a>
+        <div id="dataset-banner" class="panel banner" hidden></div>
+
+        <div class="panel row">
+            <div class="form-group"><label title="Your Forge, started with --api">Forge URL</label><input id="forge-url" type="text" style="width:190px"></div>
+            <div class="form-group"><label>LoRA weight</label><input id="weight" type="number" step="0.05"></div>
+            <label title="Render new epochs automatically while this job trains" class="muted"><input id="auto" type="checkbox"> Auto-render while training</label>
+            <button id="render" class="btn btn-primary btn-sm">Render missing</button>
+            <button id="stop" class="btn btn-secondary btn-sm">Stop</button>
+            <button id="report" class="btn btn-ghost btn-sm" title="Chart + epoch sheet PNG, saved next to the LoRAs (also made automatically when training finishes)">Build report</button>
+            <span id="status" class="muted"></span>
         </div>
 
         <div class="panel">
-            <div class="row">
-                <div class="form-group"><label title="Your Forge, started with --api">Forge URL</label><input id="forge-url" type="text" placeholder="http://127.0.0.1:7860" style="width:200px"></div>
-                <div class="form-group"><label>Job</label><select id="job"></select></div>
-                <div class="form-group"><label>LoRA weight</label><input id="weight" type="number" value="1" step="0.05" style="width:90px"></div>
-                <div class="form-group"><label title="Render a no-LoRA image too, to see how far each epoch moved from the base model"><input id="baseline" type="checkbox" checked> No-LoRA baseline</label></div>
-                <button id="run" class="btn btn-primary">Render all epochs</button>
-                <button id="stop" class="btn btn-secondary" disabled>Stop</button>
-                <span id="status"></span>
+            <div class="strip" id="strip"></div>
+            <div class="muted" style="margin-top:6px">↑/↓ switch sample · ←/→ change epoch · drag the image to wipe between the two sides</div>
+        </div>
+
+        <div class="viewer">
+            <div class="panel">
+                <div class="epochbar">
+                    <select id="left" title="Left side of the wipe"></select>
+                    <input id="epoch" type="range" min="0" max="0" value="0">
+                    <span class="lbl" id="epoch-label"></span>
+                </div>
+                <div class="wipe" id="wipe"><div class="empty">Add a sample above, then Render.</div></div>
+            </div>
+            <div class="panel" style="display:grid; gap:8px; align-content:start">
+                <div class="form-group" style="margin:0">
+                    <label>Prompt <span class="muted">(each epoch adds &lt;lora:EPOCH:weight&gt;)</span></label>
+                    <textarea id="prompt"></textarea>
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>Negative prompt</label>
+                    <textarea id="negative" style="min-height:44px"></textarea>
+                </div>
+                <div class="row"><button id="save-prompt" class="btn btn-primary btn-sm" disabled>Save &amp; re-render sample</button></div>
+                <hr style="border-color:var(--border); width:100%">
+                <div>
+                    <label class="muted">Settings template <span title="Dataset samples have no Forge settings of their own: they use this image's sampler, steps, CFG, hires, ADetailer etc., with their own caption and aspect ratio.">ⓘ</span></label>
+                    <div id="template" class="thumb add" style="width:100%; height:auto; min-height:60px; padding:8px; cursor:pointer">Drop a Forge image (used for dataset samples)</div>
+                </div>
             </div>
         </div>
 
-        <div class="panel" style="display:grid; gap:12px; grid-template-columns: minmax(240px, 1fr) 2fr;">
-            <div id="drop">Drop a Forge image here (or click)<br><small>Its prompt, seed, sampler, size, model etc. are read from the image</small></div>
-            <div class="form-group" style="margin:0">
-                <label>Prompt (each run appends <code>&lt;lora:EPOCH:weight&gt;</code> — delete any old version of this LoRA here)</label>
-                <textarea id="prompt" placeholder="Drop an image first"></textarea>
-                <label style="margin-top:8px">Negative prompt</label>
-                <textarea id="negative" style="min-height:40px"></textarea>
-                <details><summary>Full infotext sent to Forge</summary><pre id="infotext" style="white-space:pre-wrap;font-size:12px"></pre></details>
+        <div class="panel" id="loss-panel">
+            <div class="legend">
+                <span><i style="background:var(--s-train)"></i>Train loss (smoothed)</span>
+                <span><i style="background:var(--s-check)"></i>Fixed-noise check (training images, same seed each epoch)</span>
+                <span><i style="background:var(--success); height:0; border-top:2px dashed var(--success)"></i>Lowest check</span>
             </div>
-        </div>
-
-        <div class="panel" id="loss-panel" hidden>
-            <div class="legend"><span><i style="background:var(--s-val)"></i>Validation loss (fixed seed — use this one)</span><span><i style="background:var(--s-train)"></i>Train loss (noisy)</span></div>
             <svg id="chart" role="img" aria-label="Loss per epoch"></svg>
-            <details><summary>Table</summary><table id="loss-table"></table></details>
-            <small id="loss-note" style="color:var(--text-secondary)"></small>
+            <div class="row" style="justify-content:space-between">
+                <small class="muted" id="loss-note"></small>
+                <details><summary class="muted" style="cursor:pointer">Table</summary><table id="loss-table"></table></details>
+            </div>
         </div>
-
-        <div class="grid" id="grid"></div>
     </div>
+
+    <dialog id="picker">
+        <div class="row" style="justify-content:space-between; margin-bottom:8px">
+            <strong>Pick dataset images (caption = prompt)</strong>
+            <button class="btn btn-ghost btn-sm" onclick="$('picker').close()">Close</button>
+        </div>
+        <div id="pick-body"></div>
+    </dialog>
     <div id="tip"></div>
-    <input type="file" id="file" accept="image/*" hidden>
+    <input type="file" id="file" accept="image/*" multiple hidden>
 
     <script>
         const $ = (id) => document.getElementById(id);
-        const api = async (url, body) => {
-            const r = await fetch(url, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+        const params = new URLSearchParams(location.search);
+        const JOB = params.get('job');
+        if (params.get('view') === 'chart') document.body.classList.add('chart-only');
+        const J = `/api/jobs/${encodeURIComponent(JOB)}`;
+        const api = async (url, method = 'GET', body) => {
+            const r = await fetch(url, method !== 'GET' ? { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) } : {});
             const j = await r.json();
             if (!r.ok) throw new Error(j.error || r.statusText);
             return j;
         };
-        let infotext = '', stopped = false, losses = [];
+        const file = (p) => `${J}/compare/file?p=${encodeURIComponent(p)}`;
+        const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const readFile = (f) => new Promise((ok) => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(f); });
 
-        // ---- forge url (saved to [forge] url in global_config.toml) ----
-        api('/api/global-config').then(c => { $('forge-url').value = c.forge?.url || 'http://127.0.0.1:7860'; });
+        let data = null, losses = { current: [], epochs: [] };
+        let sel = null, col = 0, wipeAt = 0.5, lastWipeKey = '';
+        const say = (m, err) => { $('status').textContent = m; $('status').className = err ? 'err' : 'muted'; };
+
+        // columns of the epoch slider: No LoRA, then each checkpoint (final last)
+        const columns = () => ['__base__', ...data.checkpoints.map(c => c.name)];
+        const finalEpoch = () => losses.epochs.length ? losses.epochs[losses.epochs.length - 1].epoch : null;
+        const epochOf = (name) => name === '__base__' ? null : (data.checkpoints.find(c => c.name === name)?.epoch ?? finalEpoch());
+        const colLabel = (name) => {
+            if (name === '__base__') return 'No LoRA';
+            const c = data.checkpoints.find(c => c.name === name);
+            return c?.epoch != null ? `Epoch ${c.epoch}` : `Final${finalEpoch() ? ` (epoch ${finalEpoch()})` : ''}`;
+        };
+        const bestEpoch = () => {
+            const v = losses.epochs.filter(e => e.check != null);
+            return v.length ? v.reduce((a, b) => (b.check < a.check ? b : a)).epoch : null;
+        };
+
+        // ---------- load / poll ----------
+        async function refresh() {
+            try {
+                data = await api(`${J}/compare`);
+            } catch (e) { return say(e.message, true); }
+            if (document.activeElement !== $('forge-url')) $('forge-url').value = data.forgeUrl;
+            if (document.activeElement !== $('weight')) $('weight').value = data.weight;
+            $('auto').checked = data.auto;
+            const st = data.state;
+            if (st.error) say(st.error, true);
+            else if (st.running) say(`Rendering ${st.done}/${st.total}${st.label ? ' · ' + st.label : ''}`);
+            else say(`${data.checkpoints.length} checkpoint(s)${data.training ? ' · training' : ''}`);
+            if (!sel || !data.samples.some(s => s.id === sel)) sel = data.samples[0]?.id || null;
+            const tpl = data.template
+                ? `<img src="${file('template.png')}" style="max-height:90px; width:auto; object-fit:contain"><div class="muted">${data.template.width}×${data.template.height}, click/drop to replace</div>`
+                : 'Drop a Forge image (used for dataset samples)';
+            if ($('template').innerHTML !== tpl) $('template').innerHTML = tpl;
+            renderStrip();
+            renderSlider();
+            renderWipe();
+        }
+        async function refreshLosses() {
+            try { losses = await api(`${J}/losses`); } catch { return; }
+            renderChart();
+            if (data) renderSlider();
+        }
+        refresh().then(() => { loadPrompt(); checkDataset(); });
+        refreshLosses();
+        setInterval(() => { if (!document.hidden) refresh(); }, 3000);
+        setInterval(() => { if (!document.hidden && data?.training) refreshLosses(); }, 20000);
+
+        // ---------- top bar ----------
         $('forge-url').onchange = async () => {
             const c = await api('/api/global-config');
             c.forge = { ...c.forge, url: $('forge-url').value.trim() };
-            await fetch('/api/global-config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(c) });
-            loadJob();
+            await api('/api/global-config', 'PUT', c);
+            refresh();
         };
+        $('weight').onchange = () => api(`${J}/compare/settings`, 'PUT', { weight: +$('weight').value }).then(refresh);
+        $('auto').onchange = () => api(`${J}/compare/settings`, 'PUT', { auto: $('auto').checked });
+        $('render').onclick = () => api(`${J}/compare/render`, 'POST').then(refresh).catch(e => say(e.message, true));
+        $('stop').onclick = () => api(`${J}/compare/stop`, 'POST').then(refresh);
+        $('report').onclick = () => api(`${J}/compare/report`, 'POST').then(() => say('Building report… saved to the output folder as <name>_report.png'));
 
-        // ---- jobs ----
-        api('/api/jobs').then(jobs => {
-            $('job').innerHTML = jobs.map(j => `<option>${j.name}</option>`).join('');
-            const saved = localStorage.getItem('compare_job');
-            if (jobs.some(j => j.name === saved)) $('job').value = saved;
-            loadJob();
-        });
-        $('job').onchange = () => { localStorage.setItem('compare_job', $('job').value); loadJob(); };
-
-        // epoch number from "name-000004"; the final save has no suffix
-        const epochOf = (n) => { const m = n.match(/-(\d+)$/); return m ? +m[1] : Infinity; };
-
-        async function loadJob() {
-            $('grid').innerHTML = '';
-            $('status').textContent = 'Linking checkpoints into Forge…';
-            try {
-                const { names, losses: l } = await api(`/api/jobs/${encodeURIComponent($('job').value)}/forge-link`, {});
-                losses = l;
-                names.sort((a, b) => epochOf(a) - epochOf(b));
-                renderLosses();
-                const finalEpoch = losses.length ? losses[losses.length - 1].epoch : null;
-                const runs = names.map(n => ({ name: n, epoch: epochOf(n) === Infinity ? finalEpoch : epochOf(n) }));
-                $('grid').dataset.runs = JSON.stringify(runs);
-                renderCards(runs);
-                $('status').textContent = `${names.length} checkpoint(s) available in Forge`;
-            } catch (e) { $('status').textContent = e.message; }
-        }
-
-        function bestEpoch() {
-            const v = losses.filter(r => r.val != null);
-            return v.length ? v.reduce((a, b) => (b.val < a.val ? b : a)).epoch : null;
-        }
-
-        function renderCards(runs) {
-            const best = bestEpoch();
-            const cards = ($('baseline').checked ? [{ name: null, epoch: null }] : []).concat(runs);
-            $('grid').innerHTML = cards.map((r, i) => {
-                const l = losses.find(x => x.epoch === r.epoch);
-                const label = r.name === null ? 'No LoRA' : (r.epoch != null ? `Epoch ${r.epoch}` : r.name);
-                const meta = l ? (l.val != null ? `val ${l.val.toFixed(4)}` : `train ${l.train.toFixed(4)}`) : '';
-                return `<div class="card${r.epoch != null && r.epoch === best ? ' best' : ''}" id="card-${r.epoch}">
-                    <header><strong title="${r.name || ''}">${label}${r.epoch != null && r.epoch === best ? ' ★' : ''}</strong><span>${meta}</span></header>
-                    <div class="img" id="img-${i}">waiting</div></div>`;
-            }).join('');
-            return cards;
-        }
-
-        // ---- drop image ----
-        const drop = $('drop');
-        drop.onclick = () => $('file').click();
-        $('file').onchange = (e) => e.target.files[0] && readImage(e.target.files[0]);
-        drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
-        drop.ondragleave = () => drop.classList.remove('over');
-        drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); e.dataTransfer.files[0] && readImage(e.dataTransfer.files[0]); };
-
-        function readImage(file) {
-            const reader = new FileReader();
-            reader.onload = async () => {
-                drop.innerHTML = `<img src="${reader.result}">${file.name}`;
-                try {
-                    const info = await api('/api/forge/png-info', { image: reader.result });
-                    if (!info.info) throw new Error('No generation info in this image (needs a PNG saved by Forge/A1111 with metadata)');
-                    infotext = info.info;
-                    $('infotext').textContent = infotext;
-                    $('prompt').value = info.parameters.Prompt || '';
-                    $('negative').value = info.parameters['Negative prompt'] || '';
-                    $('status').textContent = 'Image loaded';
-                } catch (e) { $('status').textContent = e.message; }
-            };
-            reader.readAsDataURL(file);
-        }
-
-        // ---- render ----
-        $('stop').onclick = () => { stopped = true; $('status').textContent = 'Stopping after current image…'; };
-        $('run').onclick = async () => {
-            if (!infotext) { $('status').textContent = 'Drop an image first'; return; }
-            const runs = JSON.parse($('grid').dataset.runs || '[]');
-            const cards = renderCards(runs);
-            stopped = false; $('run').disabled = true; $('stop').disabled = false;
-            for (let i = 0; i < cards.length && !stopped; i++) {
-                const c = cards[i], cell = $(`img-${i}`);
-                cell.textContent = 'rendering…';
-                $('status').textContent = `Rendering ${i + 1}/${cards.length}`;
-                const prompt = c.name === null ? $('prompt').value : `${$('prompt').value} <lora:${c.name}:${$('weight').value}>`;
-                try {
-                    const r = await api('/api/forge/txt2img', {
-                        infotext, prompt, negative_prompt: $('negative').value,
-                        batch_size: 1, n_iter: 1, save_images: false, send_images: true,
-                        // Forge Neo's infotext parser crashes on list-typed fields, so set those ourselves
-                        styles: [], hr_additional_modules: ['Use same choices'],
-                    });
-                    cell.innerHTML = `<img src="data:image/png;base64,${r.images[0]}">`;
-                    cell.querySelector('img').onclick = (e) => window.open().document.write(`<img src="${e.target.src}" style="max-width:100%">`);
-                } catch (e) { cell.textContent = e.message; }
+        // ---------- samples ----------
+        function renderStrip() {
+            const cards = data.samples.map((s, i) => `
+                <div class="thumb${s.id === sel ? ' sel' : ''}" data-id="${s.id}" title="${esc(s.prompt.slice(0, 200))}">
+                    <img src="${file(s.original)}" loading="lazy">
+                    <button class="x" data-del="${s.id}" title="Remove">×</button>
+                    <span class="tag">${i + 1} · ${s.kind === 'dataset' ? 'dataset' : 'forge'} · ${(data.renders[s.id] || []).length}/${columns().length}</span>
+                </div>`).join('');
+            const html = cards + `
+                <div class="thumb add" id="add-forge">+ Forge image<br><small>drop or click</small></div>
+                <div class="thumb add" id="add-dataset">+ From dataset</div>`;
+            if ($('strip').dataset.html !== html) {
+                $('strip').innerHTML = html;
+                $('strip').dataset.html = html;
+                bindStrip();
             }
-            $('status').textContent = stopped ? 'Stopped' : 'Done';
-            $('run').disabled = false; $('stop').disabled = true;
+        }
+        function bindStrip() {
+            $('strip').querySelectorAll('.thumb[data-id]').forEach(el => el.onclick = (e) => {
+                if (e.target.dataset.del) return;
+                selectSample(el.dataset.id);
+            });
+            $('strip').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+                if (!confirm('Remove this sample and its renders?')) return;
+                await api(`${J}/compare/samples/${b.dataset.del}`, 'DELETE');
+                refresh().then(loadPrompt);
+            });
+            const add = $('add-forge');
+            add.onclick = () => $('file').click();
+            dropTarget(add, addForge);
+            $('add-dataset').onclick = openPicker;
+        }
+        function selectSample(id) {
+            sel = id;
+            renderStrip();
+            renderWipe();
+            loadPrompt();
+        }
+        function loadPrompt() {
+            const s = data?.samples.find(x => x.id === sel);
+            $('prompt').value = s?.prompt || '';
+            $('negative').value = s ? (s.negative ?? data.template?.negative ?? '') : '';
+            $('save-prompt').disabled = true;
+        }
+        $('prompt').oninput = $('negative').oninput = () => { $('save-prompt').disabled = !sel; };
+        $('save-prompt').onclick = async () => {
+            await api(`${J}/compare/samples/${sel}`, 'PUT', { prompt: $('prompt').value, negative: $('negative').value });
+            await api(`${J}/compare/render`, 'POST');
+            $('save-prompt').disabled = true;
+            refresh();
         };
-        $('baseline').onchange = () => renderCards(JSON.parse($('grid').dataset.runs || '[]'));
 
-        // ---- loss chart ----
-        function renderLosses() {
-            $('loss-panel').hidden = !losses.length;
-            if (!losses.length) return;
-            const hasVal = losses.some(r => r.val != null);
-            $('loss-note').textContent = hasVal
-                ? `Lowest validation loss: epoch ${bestEpoch()} (★). It usually bottoms out then climbs as the LoRA overfits — check the images around that point.`
-                : 'No validation loss logged. Set "Validation Split" (e.g. 0.1) in the job\'s dataset settings to get a reliable curve; train loss alone is too noisy to pick epochs.';
-            $('loss-table').innerHTML = '<tr><th>Epoch</th><th>Val</th><th>Train</th></tr>' +
-                losses.map(r => `<tr><td>${r.epoch}</td><td>${r.val?.toFixed(4) ?? '—'}</td><td>${r.train.toFixed(4)}</td></tr>`).join('');
+        async function addForge(files) {
+            for (const f of files) {
+                try {
+                    const s = await api(`${J}/compare/samples`, 'POST', { kind: 'forge', image: await readFile(f) });
+                    sel = s.id;
+                } catch (e) { say(e.message, true); }
+            }
+            await refresh();
+            loadPrompt();
+        }
+        $('file').onchange = (e) => { addForge([...e.target.files]); e.target.value = ''; };
 
-            const svg = $('chart'), W = svg.clientWidth || 800, H = 260, P = { l: 52, r: 56, t: 10, b: 26 };
-            const ys = losses.flatMap(r => [r.train, r.val]).filter(v => v != null);
+        function dropTarget(el, fn) {
+            el.ondragover = (e) => { e.preventDefault(); el.classList.add('over'); };
+            el.ondragleave = () => el.classList.remove('over');
+            el.ondrop = (e) => { e.preventDefault(); el.classList.remove('over'); if (e.dataTransfer.files.length) fn([...e.dataTransfer.files]); };
+        }
+
+        // settings template
+        const tplInput = Object.assign(document.createElement('input'), { type: 'file', accept: 'image/*' });
+        const setTemplate = async ([f]) => {
+            try { await api(`${J}/compare/template`, 'POST', { image: await readFile(f) }); say('Template set; dataset samples will re-render'); }
+            catch (e) { say(e.message, true); }
+            refresh();
+        };
+        tplInput.onchange = () => tplInput.files[0] && setTemplate([tplInput.files[0]]);
+        $('template').onclick = () => tplInput.click();
+        dropTarget($('template'), setTemplate);
+
+        // dataset picker
+        async function openPicker() {
+            $('pick-body').innerHTML = '<span class="muted">Loading…</span>';
+            $('picker').showModal();
+            const subs = await api(`${J}/dataset-images`);
+            $('pick-body').innerHTML = subs.map(s => `
+                <h4 class="muted" style="margin:8px 0">${esc(s.dir)}${s.exists ? ` · ${s.files.length} images` : ' · folder missing (see banner)'}</h4>
+                <div class="pick">${s.files.map(f => `<img loading="lazy" data-s="${s.subset}" data-f="${esc(f.file)}" title="${esc(f.caption)}" src="${J}/dataset-image?s=${s.subset}&f=${encodeURIComponent(f.file)}">`).join('')}</div>`).join('');
+            $('pick-body').querySelectorAll('img').forEach(img => img.onclick = async () => {
+                // keep the template's pixel count, match this image's aspect ratio
+                const tw = data.template?.width || 1024, th = data.template?.height || 1024;
+                const a = img.naturalWidth / img.naturalHeight, area = tw * th;
+                const width = Math.round(Math.sqrt(area * a) / 64) * 64, height = Math.round(Math.sqrt(area / a) / 64) * 64;
+                img.style.opacity = 0.4;
+                try {
+                    const s = await api(`${J}/compare/samples`, 'POST', { kind: 'dataset', subset: +img.dataset.s, file: img.dataset.f, width, height });
+                    sel = s.id;
+                } catch (e) { say(e.message, true); }
+                await refresh();
+                loadPrompt();
+            });
+        }
+
+        // ---------- slider + wipe ----------
+        function renderSlider() {
+            if (!data) return;
+            const cols = columns();
+            $('epoch').max = cols.length - 1;
+            col = Math.min(col, cols.length - 1);
+            $('epoch').value = col;
+            const name = cols[col];
+            const e = losses.epochs.find(x => x.epoch === epochOf(name));
+            const best = bestEpoch();
+            $('epoch-label').textContent = colLabel(name) + (e?.check != null ? ` · check ${e.check.toFixed(4)}` : '') + (e && e.epoch === best ? ' ★' : '');
+            const opts = `<option value="original">Original</option>` + cols.map(c => `<option value="${esc(c)}">${esc(colLabel(c))}</option>`).join('');
+            if ($('left').dataset.opts !== opts) {
+                const v = $('left').value || 'original';
+                $('left').innerHTML = opts;
+                $('left').dataset.opts = opts;
+                $('left').value = [...$('left').options].some(o => o.value === v) ? v : 'original';
+            }
+            renderChart();
+        }
+        $('epoch').oninput = () => { col = +$('epoch').value; renderSlider(); renderWipe(); };
+        $('left').onchange = renderWipe;
+
+        function srcFor(s, which) {
+            if (which === 'original') return file(s.original);
+            return (data.renders[s.id] || []).includes(which) ? file(`renders/${s.id}/${which}.png`) : null;
+        }
+        function renderWipe() {
+            const s = data?.samples.find(x => x.id === sel);
+            if (!s) {
+                $('wipe').innerHTML = '<div class="empty">Add a sample above (a Forge image, or a dataset image + a settings template), then Render.</div>';
+                lastWipeKey = '';
+                return;
+            }
+            const leftKey = $('left').value || 'original', rightKey = columns()[col];
+            const l = srcFor(s, leftKey), r = srcFor(s, rightKey);
+            const leftName = leftKey === 'original' ? 'Original' : colLabel(leftKey);
+            const key = `${l}|${r}|${leftName}|${colLabel(rightKey)}`;
+            if (key !== lastWipeKey) {
+                lastWipeKey = key;
+                $('wipe').innerHTML = `
+                    ${l ? `<img src="${l}">` : `<div class="empty">${esc(leftName)} not rendered yet</div>`}
+                    <div class="right" id="wr">${r ? `<img src="${r}">` : `<div class="empty">${esc(colLabel(rightKey))} not rendered yet</div>`}</div>
+                    <div class="divider" id="wd"></div>
+                    <span class="corner" style="left:8px">${esc(leftName)}</span>
+                    <span class="corner" style="right:8px">${esc(colLabel(rightKey))}</span>`;
+            }
+            placeWipe();
+        }
+        function placeWipe() {
+            const wr = $('wr'), wd = $('wd');
+            if (!wr) return;
+            wr.style.clipPath = `inset(0 0 0 ${wipeAt * 100}%)`;
+            wd.style.left = `calc(${wipeAt * 100}% - 1px)`;
+        }
+        const wipe = $('wipe');
+        const moveWipe = (e) => { const b = wipe.getBoundingClientRect(); wipeAt = Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)); placeWipe(); };
+        wipe.onpointerdown = (e) => { wipe.setPointerCapture(e.pointerId); moveWipe(e); };
+        wipe.onpointermove = (e) => { if (e.buttons) moveWipe(e); };
+
+        document.addEventListener('keydown', (e) => {
+            if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && e.target.type !== 'range') return;
+            if (!data || $('picker').open) return;
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                col = Math.max(0, Math.min(columns().length - 1, col + (e.key === 'ArrowRight' ? 1 : -1)));
+                renderSlider(); renderWipe(); e.preventDefault();
+            } else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && data.samples.length) {
+                const i = data.samples.findIndex(s => s.id === sel);
+                const n = Math.max(0, Math.min(data.samples.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)));
+                selectSample(data.samples[n].id); e.preventDefault();
+            }
+        });
+
+        // ---------- missing dataset ----------
+        async function checkDataset() {
+            let r;
+            try { r = await api(`${J}/dataset-check`); } catch { return; }
+            const b = $('dataset-banner');
+            b.hidden = !r.missing.length;
+            b.innerHTML = r.missing.map(m => `
+                <div><strong>Dataset folder missing:</strong> <code>${esc(m.dir)}</code>${m.trainedCount ? ` <span class="muted">(this LoRA was trained on ${m.trainedCount} images)</span>` : ''}</div>
+                ${m.matches.length ? m.matches.map(c => `
+                    <div class="row" style="margin-top:6px">
+                        <button class="btn btn-primary btn-sm" data-fix="${esc(JSON.stringify({ subset: m.subset, dir: c.dir, kind: c.kind }))}">${c.kind === 'uncompiled' ? 'Compile subsets &amp; use' : 'Use this folder'}</button>
+                        <code>${esc(c.dir)}</code>
+                        <span class="muted">${c.kind === 'uncompiled' ? 'category subsets' : 'compiled'}, ${c.count} images, ${Math.round(c.score * 100)}% tag match</span>
+                    </div>`).join('') : '<div class="muted">No folder with matching tags found. Fix the path in the Dataset tab.</div>'}`).join('<hr>');
+            b.querySelectorAll('[data-fix]').forEach(btn => btn.onclick = async () => {
+                btn.disabled = true;
+                btn.textContent = 'Working…';
+                try {
+                    const res = await api(`${J}/dataset-fix`, 'POST', JSON.parse(btn.dataset.fix));
+                    say(`Dataset path set to ${res.dir}. Re-open the job to see it in the Dataset tab.`);
+                } catch (e) { say(e.message, true); }
+                checkDataset();
+            });
+        }
+
+        // ---------- chart ----------
+        function renderChart() {
+            const svg = $('chart');
+            const cur = losses.current, eps = losses.epochs;
+            const best = bestEpoch();
+            $('loss-note').textContent = !cur.length ? 'No loss logged yet (needs TensorBoard logging, on by default).'
+                : eps.some(e => e.check != null) ? `Lowest fixed-noise check: epoch ${best} ★. It flattens as the LoRA stops learning; past that, compare images to catch overfitting.`
+                    : 'No fixed-noise check in this run. Turn on "Loss indicator" in the Dataset tab for the next run.';
+            $('loss-table').innerHTML = '<tr><th>Epoch</th><th>Check</th><th>Train</th></tr>' +
+                eps.map(e => `<tr><td>${e.epoch}${e.epoch === best ? ' ★' : ''}</td><td>${e.check?.toFixed(4) ?? '—'}</td><td>${e.train.toFixed(4)}</td></tr>`).join('');
+            if (!cur.length) { svg.innerHTML = ''; return; }
+
+            const W = svg.clientWidth || 800, H = 240, P = { l: 52, r: 44, t: 10, b: 26 };
+            let acc = null;
+            const smooth = cur.map(([s, v]) => [s, acc = acc === null ? v : acc * 0.9 + v * 0.1]);
+            const ys = smooth.map(p => p[1]).concat(eps.map(e => e.train), eps.filter(e => e.check != null).map(e => e.check));
             let lo = Math.min(...ys), hi = Math.max(...ys); const pad = (hi - lo) * 0.1 || 0.01; lo -= pad; hi += pad;
-            const e0 = losses[0].epoch, e1 = losses[losses.length - 1].epoch;
-            const x = (e) => P.l + (e1 === e0 ? 0.5 : (e - e0) / (e1 - e0)) * (W - P.l - P.r);
+            const maxStep = cur[cur.length - 1][0] || 1;
+            const x = (s) => P.l + s / maxStep * (W - P.l - P.r);
             const y = (v) => P.t + (1 - (v - lo) / (hi - lo)) * (H - P.t - P.b);
-            const line = (k, color, label) => {
-                const pts = losses.filter(r => r[k] != null);
-                if (!pts.length) return '';
-                const last = pts[pts.length - 1];
-                return `<polyline fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" points="${pts.map(r => `${x(r.epoch)},${y(r[k])}`).join(' ')}"/>` +
-                    pts.map(r => `<circle cx="${x(r.epoch)}" cy="${y(r[k])}" r="4" fill="${color}" stroke="var(--bg-secondary)" stroke-width="2"/>`).join('') +
-                    `<text x="${x(last.epoch) + 8}" y="${y(last[k]) + 4}">${label}</text>`;
-            };
-            let grid = '';
+
+            let g = '';
             for (let i = 0; i <= 4; i++) {
                 const v = lo + (hi - lo) * i / 4;
-                grid += `<line x1="${P.l}" x2="${W - P.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--border)" stroke-width="1"/><text x="${P.l - 6}" y="${y(v) + 4}" text-anchor="end">${v.toFixed(3)}</text>`;
+                g += `<line x1="${P.l}" x2="${W - P.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--border)"/><text x="${P.l - 6}" y="${y(v) + 4}" text-anchor="end">${v.toFixed(3)}</text>`;
             }
-            const step = Math.max(1, Math.ceil(losses.length / 12));
-            losses.forEach((r, i) => { if (i % step === 0 || i === losses.length - 1) grid += `<text x="${x(r.epoch)}" y="${H - 6}" text-anchor="middle">${r.epoch}</text>`; });
-            const best = bestEpoch();
-            const bestMark = best != null ? `<line x1="${x(best)}" x2="${x(best)}" y1="${P.t}" y2="${H - P.b}" stroke="var(--success)" stroke-dasharray="4 4"/>` : '';
+            const every = Math.max(1, Math.ceil(eps.length / 15));
+            eps.forEach((e, i) => { if (i % every === 0 || i === eps.length - 1) g += `<text x="${x(e.step)}" y="${H - 6}" text-anchor="middle">${e.epoch}</text>`; });
+            if (best != null) { const bs = eps.find(e => e.epoch === best).step; g += `<line x1="${x(bs)}" x2="${x(bs)}" y1="${P.t}" y2="${H - P.b}" stroke="var(--success)" stroke-dasharray="4 4"/>`; }
+            const selEpoch = data ? epochOf(columns()[col]) : null;
+            const selE = eps.find(e => e.epoch === selEpoch);
+            if (selE) g += `<line x1="${x(selE.step)}" x2="${x(selE.step)}" y1="${P.t}" y2="${H - P.b}" stroke="var(--text-primary)" stroke-width="1"/>`;
+            g += `<polyline fill="none" stroke="var(--s-train)" stroke-width="2" points="${smooth.map(([s, v]) => `${x(s)},${y(v)}`).join(' ')}"/>`;
+            const chk = eps.filter(e => e.check != null);
+            if (chk.length) {
+                g += `<polyline fill="none" stroke="var(--s-check)" stroke-width="2" stroke-linejoin="round" points="${chk.map(e => `${x(e.step)},${y(e.check)}`).join(' ')}"/>`;
+                g += chk.map(e => `<circle cx="${x(e.step)}" cy="${y(e.check)}" r="4" fill="var(--s-check)" stroke="var(--bg-secondary)" stroke-width="2"/>`).join('');
+                const last = chk[chk.length - 1];
+                g += `<text x="${x(last.step) + 8}" y="${y(last.check) + 4}">check</text>`;
+            }
+            const lastS = smooth[smooth.length - 1];
+            g += `<text x="${x(lastS[0]) + 8}" y="${y(lastS[1]) + 4}">train</text>`;
+            g += `<line id="xhair" y1="${P.t}" y2="${H - P.b}" stroke="var(--text-muted)" visibility="hidden"/>`;
+            g += `<rect id="hit" x="${P.l}" y="0" width="${W - P.l - P.r}" height="${H}" fill="transparent" style="cursor:pointer"/>`;
             svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-            svg.innerHTML = grid + bestMark + line('train', 'var(--s-train)', 'train') + line('val', 'var(--s-val)', 'val') +
-                `<line id="xhair" y1="${P.t}" y2="${H - P.b}" stroke="var(--text-muted)" visibility="hidden"/>` +
-                `<rect x="${P.l}" y="0" width="${W - P.l - P.r}" height="${H}" fill="transparent" id="hit"/>`;
+            svg.innerHTML = g;
 
-            // hover: nearest epoch → crosshair + tooltip; click → jump to that epoch's image
+            if (!eps.length) return;
             const nearest = (ev) => {
                 const px = (ev.clientX - svg.getBoundingClientRect().left) * (W / svg.clientWidth);
-                return losses.reduce((a, b) => (Math.abs(x(b.epoch) - px) < Math.abs(x(a.epoch) - px) ? b : a));
+                return eps.reduce((a, b) => (Math.abs(x(b.step) - px) < Math.abs(x(a.step) - px) ? b : a));
             };
             const hit = $('hit'), xh = $('xhair'), tip = $('tip');
             hit.onmousemove = (ev) => {
-                const r = nearest(ev);
-                xh.setAttribute('x1', x(r.epoch)); xh.setAttribute('x2', x(r.epoch)); xh.setAttribute('visibility', 'visible');
+                const e = nearest(ev);
+                xh.setAttribute('x1', x(e.step)); xh.setAttribute('x2', x(e.step)); xh.setAttribute('visibility', 'visible');
                 tip.style.display = 'block'; tip.style.left = ev.clientX + 12 + 'px'; tip.style.top = ev.clientY + 12 + 'px';
-                tip.innerHTML = `<strong>Epoch ${r.epoch}</strong><br>val ${r.val?.toFixed(4) ?? '—'}<br>train ${r.train.toFixed(4)}`;
+                tip.innerHTML = `<strong>Epoch ${e.epoch}</strong>${e.epoch === best ? ' ★' : ''}<br>check ${e.check?.toFixed(4) ?? '—'}<br>train ${e.train.toFixed(4)}${data ? '<br><span class="muted">click to view</span>' : ''}`;
             };
             hit.onmouseleave = () => { tip.style.display = 'none'; xh.setAttribute('visibility', 'hidden'); };
-            hit.onclick = (ev) => $(`card-${nearest(ev).epoch}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            hit.onclick = (ev) => {
+                if (!data) return;
+                const target = nearest(ev).epoch;
+                const i = columns().findIndex(n => epochOf(n) === target);
+                if (i >= 0) { col = i; renderSlider(); renderWipe(); }
+            };
         }
-        window.onresize = () => losses.length && renderLosses();
+        window.onresize = renderChart;
     </script>
 </body>
 

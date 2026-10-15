@@ -689,7 +689,18 @@ class NetworkTrainer:
                     }
 
             blueprint = blueprint_generator.generate(user_config, args)
-            train_dataset_group, val_dataset_group = config_util.generate_dataset_group_by_blueprint(blueprint.dataset_group)
+            if args.validate_on_train_images:
+                # Fixed-noise loss over the training images themselves: nothing is held out, so it shows
+                # when learning flattens out rather than generalisation. Built as a second, full copy of the dataset.
+                val_blueprint = copy.deepcopy(blueprint.dataset_group)
+                for d in blueprint.dataset_group.datasets:
+                    d.params.validation_split = 0.0
+                for d in val_blueprint.datasets:
+                    d.params.validation_split = 1.0
+                train_dataset_group, _ = config_util.generate_dataset_group_by_blueprint(blueprint.dataset_group)
+                _, val_dataset_group = config_util.generate_dataset_group_by_blueprint(val_blueprint)
+            else:
+                train_dataset_group, val_dataset_group = config_util.generate_dataset_group_by_blueprint(blueprint.dataset_group)
 
             # Build phase dataset groups now (before latent caching)
             _phase_dataset_groups = []
@@ -1946,7 +1957,6 @@ class NetworkTrainer:
                 if global_step >= args.max_train_steps:
                     break
 
-            epoch_val_loss = None
             # EPOCH VALIDATION
             should_validate_epoch = (
                 (epoch + 1) % args.validate_every_n_epochs == 0 if args.validate_every_n_epochs is not None else True
@@ -2007,7 +2017,6 @@ class NetworkTrainer:
                         self.on_validation_step_end(args, accelerator, network, text_encoders, unet, batch, weight_dtype)
                         val_timesteps_step += 1
 
-                epoch_val_loss = val_epoch_loss_recorder.moving_average
                 if is_tracking:
                     avr_loss: float = val_epoch_loss_recorder.moving_average
                     loss_validation_divergence = val_epoch_loss_recorder.moving_average - loss_recorder.moving_average
@@ -2028,16 +2037,6 @@ class NetworkTrainer:
             if is_tracking:
                 logs = {"loss/epoch_average": loss_recorder.moving_average}
                 self.epoch_logging(accelerator, logs, global_step, epoch + 1)
-
-            # per-epoch loss table for the training UI's Compare page
-            if accelerator.is_main_process and args.output_dir:
-                csv_path = os.path.join(args.output_dir, f"{args.output_name or 'last'}_losses.csv")
-                new_file = not os.path.exists(csv_path) or epoch == 0
-                with open(csv_path, "w" if new_file else "a", encoding="utf-8") as f:
-                    if new_file:
-                        f.write("epoch,train_loss,val_loss\n")
-                    val = "" if epoch_val_loss is None else f"{epoch_val_loss:.6f}"
-                    f.write(f"{epoch + 1},{loss_recorder.moving_average:.6f},{val}\n")
 
             accelerator.wait_for_everyone()
 
@@ -2232,6 +2231,11 @@ def setup_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.0,
         help="Split for validation images out of the training dataset / 学習画像から検証画像に分割する割合",
+    )
+    parser.add_argument(
+        "--validate_on_train_images",
+        action="store_true",
+        help="Validate on the training images (fixed seed/timesteps) instead of holding images out. Use with --max_validation_steps to cap the cost",
     )
     parser.add_argument(
         "--validate_every_n_steps",
