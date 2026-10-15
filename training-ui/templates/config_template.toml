@@ -23,7 +23,6 @@ persistent_data_loader_workers = true
 seed = 42
 cache_latents_to_disk = true
 cache_text_encoder_outputs_to_disk = true
-sample_every_n_epochs = 1
 
 [network_arguments]
 network_module = "networks.lora_anima"
