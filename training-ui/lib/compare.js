@@ -510,7 +510,15 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
                 if (fs.existsSync(to)) continue;
                 try { fs.linkSync(src, to); } catch { fs.copyFileSync(src, to); } // hardlink: no second copy on disk
             }
-            for (const [f, text] of Object.entries(captions)) fs.writeFileSync(path.join(dir, f), text);
+            let changed = false;
+            for (const [f, text] of Object.entries(captions)) {
+                const p = path.join(dir, f);
+                if (fs.existsSync(p) && fs.readFileSync(p, 'utf8') === text) continue;
+                fs.writeFileSync(p, text);
+                changed = true;
+            }
+            // the trainer's text-encoder cache doesn't notice caption edits
+            if (changed) fs.rmSync(path.join(dir, 'cache_text_encoder'), { recursive: true, force: true });
         }
         const p = path.join(jobDir(job), 'dataset.toml');
         const ds = TOML.parse(fs.readFileSync(p, 'utf8'));

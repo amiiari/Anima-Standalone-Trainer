@@ -27,8 +27,14 @@ def ema(values, k=0.9):
 
 
 def best_epoch(epochs):
+    """Where the fixed-noise check flattens: first epoch with 90% of its total drop done
+    (its lowest point is usually just the last epoch, since it's measured on training images)."""
     checked = [e for e in epochs if e["check"] is not None]
-    return min(checked, key=lambda e: e["check"])["epoch"] if checked else None
+    if len(checked) < 3:
+        return None
+    low = min(e["check"] for e in checked)
+    drop = checked[0]["check"] - low
+    return next(e["epoch"] for e in checked if e["check"] - low <= drop * 0.1)
 
 
 def draw_chart(losses, width, height=420):
@@ -74,7 +80,7 @@ def draw_chart(losses, width, height=420):
     d.text((l, 12), "Train loss (smoothed)", fill=TRAIN, font=font(15))
     d.text((l + 200, 12), "Fixed-noise check", fill=CHECK, font=font(15))
     if best is not None:
-        d.text((l + 370, 12), f"lowest check: epoch {best}", fill=BEST, font=font(15))
+        d.text((l + 370, 12), f"learning flattens: epoch {best}", fill=BEST, font=font(15))
     return img
 
 

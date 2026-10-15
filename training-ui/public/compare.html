@@ -118,7 +118,7 @@
             <div class="legend">
                 <span><i style="background:var(--s-train)"></i>Train loss (smoothed)</span>
                 <span><i style="background:var(--s-check)"></i>Fixed-noise check (training images, same seed each epoch)</span>
-                <span><i style="background:var(--success); height:0; border-top:2px dashed var(--success)"></i>Lowest check</span>
+                <span><i style="background:var(--success); height:0; border-top:2px dashed var(--success)"></i>Learning flattens (90% of the drop done)</span>
             </div>
             <svg id="chart" role="img" aria-label="Loss per epoch"></svg>
             <div class="row" style="justify-content:space-between">
@@ -167,9 +167,13 @@
             const c = data.checkpoints.find(c => c.name === name);
             return c?.epoch != null ? `Epoch ${c.epoch}` : `Final${finalEpoch() ? ` (epoch ${finalEpoch()})` : ''}`;
         };
+        // The check is measured on training images, so it keeps creeping down; its lowest point is
+        // usually just the last epoch. Mark where it flattens instead: first epoch with 90% of the drop done.
         const bestEpoch = () => {
             const v = losses.epochs.filter(e => e.check != null);
-            return v.length ? v.reduce((a, b) => (b.check < a.check ? b : a)).epoch : null;
+            if (v.length < 3) return null;
+            const min = Math.min(...v.map(e => e.check)), drop = v[0].check - min;
+            return v.find(e => e.check - min <= drop * 0.1).epoch;
         };
 
         // ---------- load / poll ----------
@@ -424,7 +428,7 @@
             const cur = losses.current, eps = losses.epochs;
             const best = bestEpoch();
             $('loss-note').textContent = !cur.length ? 'No loss logged yet (needs TensorBoard logging, on by default).'
-                : eps.some(e => e.check != null) ? `Lowest fixed-noise check: epoch ${best} ★. It flattens as the LoRA stops learning; past that, compare images to catch overfitting.`
+                : eps.some(e => e.check != null) ? (best != null ? `Learning flattens around epoch ${best} ★. Epochs from there on are the ones worth comparing; later ones can start to overfit, so judge them by the images.` : 'Fixed-noise check needs a few epochs before it can show where learning flattens.')
                     : 'No fixed-noise check in this run. Turn on "Loss indicator" in the Dataset tab for the next run.';
             $('loss-table').innerHTML = '<tr><th>Epoch</th><th>Check</th><th>Train</th></tr>' +
                 eps.map(e => `<tr><td>${e.epoch}${e.epoch === best ? ' ★' : ''}</td><td>${e.check?.toFixed(4) ?? '—'}</td><td>${e.train.toFixed(4)}</td></tr>`).join('');
