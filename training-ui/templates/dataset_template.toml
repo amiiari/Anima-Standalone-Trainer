@@ -9,6 +9,7 @@ bucket_reso_steps = 64
 resolution = [1536, 1536]
 batch_size = 1
 caption_extension = ".txt"
+validation_split = 0.15
 
   [[datasets.subsets]]
   image_dir = ""

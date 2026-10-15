@@ -49,6 +49,7 @@
                 <!-- Jobs rendered here -->
             </div>
             <div class="sidebar-footer">
+                <a href="compare.html" class="btn btn-ghost btn-block">🖼️ Compare Epochs</a>
                 <button id="btn-global-settings" class="btn btn-ghost btn-block">⚙️ Global Settings</button>
             </div>
         </aside>
@@ -115,6 +116,7 @@
                                     <option value="Lion8bit">Lion8bit</option>
                                     <option value="PagedLion8bit">PagedLion8bit</option>
                                     <option value="SGDNesterov8bit">SGDNesterov8bit</option>
+                                    <option value="pytorch_optimizer.CAME">CAME</option>
                                     <option value="Prodigy">Prodigy</option>
                                     <option value="AdamWScheduleFree">AdamWScheduleFree</option>
                                     <option value="RAdamScheduleFree">RAdamScheduleFree</option>
@@ -356,6 +358,10 @@
                             <div class="form-group">
                                 <label>Caption Extension</label>
                                 <input type="text" id="cfg-caption-ext" value=".txt" placeholder=".txt">
+                            </div>
+                            <div class="form-group">
+                                <label title="Holds out this fraction of images and logs a fixed-seed validation loss every epoch (loss/validation/epoch_average in TensorBoard). Lowest point = least overfit checkpoint. 0 = off.">Validation Split</label>
+                                <input type="number" id="cfg-validation-split" value="0.15" min="0" max="0.5" step="0.05">
                             </div>
                         </div>
 

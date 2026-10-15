@@ -546,6 +546,7 @@ function populateDataset(dataset) {
 
   const d = dArray[0];
   $("cfg-caption-ext").value = d.caption_extension || ".txt";
+  $("cfg-validation-split").value = d.validation_split ?? 0.15;
   $("cfg-enable-bucket").checked = g.enable_bucket ?? true;
   $("cfg-bucket-no-upscale").checked = g.bucket_no_upscale ?? true;
   $("cfg-min-bucket").value = g.min_bucket_reso ?? 512;
@@ -848,6 +849,7 @@ function gatherDataset() {
           resolution: [r, r],
           batch_size: b,
           caption_extension: $("cfg-caption-ext").value,
+          validation_split: safeFloat($("cfg-validation-split").value) || undefined,
           subsets: currentSubsets.map((s) => {
             const subset = {
               image_dir: s.image_dir,
@@ -2303,6 +2305,7 @@ async function saveGlobalSettings() {
     }
   }
   const config = {
+    ...existingConfig, // keep sections this form doesn't edit (e.g. [forge])
     model_paths,
     venv_path: $("cfg-global-venv").value,
     ui: {

@@ -888,6 +888,11 @@ const isWSL = process.platform === 'linux' && !!process.env.WSL_DISTRO_NAME;
 
 // Open a file path or URL in the system file manager / browser
 function openNative(target, isUrl = false) {
+    // Respect BROWSER env var for URLs — launch specified browser directly
+    if (isWindows && isUrl && process.env.BROWSER && process.env.BROWSER !== 'none') {
+        spawn(process.env.BROWSER, [target], { detached: true, stdio: 'ignore' });
+        return;
+    }
     if (isWindows) {
         spawn('explorer', [target]);
     } else if (isWSL) {
@@ -1180,6 +1185,87 @@ app.get('/api/jobs/:name/checkpoints', (req, res) => {
     }
 });
 
+// --- Compare epochs: re-render a dropped image through your own Forge ---
+
+function forgeConfig() {
+    const f = getGlobalConfig().forge || {};
+    return { url: (f.url || 'http://127.0.0.1:7860').replace(/\/+$/, ''), loraDir: f.lora_dir || '' };
+}
+
+async function forgePost(endpoint, body) {
+    const r = await fetch(forgeConfig().url + endpoint, body === undefined ? {} : {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(`Forge ${endpoint} -> ${r.status}: ${(await r.text()).slice(0, 300)}`);
+    return r.json();
+}
+
+// Forge's Lora folder, worked out from the paths of the LoRAs it already lists (Forge must be on this PC).
+// Any folder inside it works since Forge scans subfolders. [forge] lora_dir overrides.
+async function forgeLoraDir() {
+    const { loraDir } = forgeConfig();
+    if (loraDir) return loraDir;
+    const loras = await forgePost('/sdapi/v1/loras');
+    if (!loras.length) throw new Error('Forge lists no LoRAs, so its Lora folder is unknown. Set lora_dir under [forge] in global_config.toml');
+    const dirs = loras.map(l => path.dirname(l.path)).sort((a, b) => a.length - b.length);
+    if (!fs.existsSync(dirs[0])) throw new Error(`Forge's Lora folder ${dirs[0]} isn't on this PC`);
+    return dirs[0];
+}
+
+app.post('/api/forge/png-info', async (req, res) => {
+    try {
+        res.json(await forgePost('/sdapi/v1/png-info', { image: req.body.image }));
+    } catch (err) {
+        res.status(502).json({ error: err.message });
+    }
+});
+
+app.post('/api/forge/txt2img', async (req, res) => {
+    try {
+        res.json(await forgePost('/sdapi/v1/txt2img', req.body));
+    } catch (err) {
+        res.status(502).json({ error: err.message });
+    }
+});
+
+// Hardlinks the job's checkpoints into Forge's Lora folder (_trainer/<job>/) so <lora:name:w> resolves,
+// and returns the per-epoch loss table written by train_network.py.
+app.post('/api/jobs/:name/forge-link', async (req, res) => {
+    try {
+        const loraDir = await forgeLoraDir();
+        const src = path.join(getJobPath(req.params.name), 'output');
+        if (!fs.existsSync(src)) throw new Error(`No output folder yet: ${src}`);
+        const dst = path.join(loraDir, '_trainer', sanitizeName(req.params.name));
+        fs.mkdirSync(dst, { recursive: true });
+
+        const files = fs.readdirSync(src);
+        const names = [];
+        for (const f of files.filter(f => f.endsWith('.safetensors'))) {
+            const from = path.join(src, f), to = path.join(dst, f);
+            const same = fs.existsSync(to) && fs.statSync(to).ino === fs.statSync(from).ino;
+            if (!same) {
+                fs.rmSync(to, { force: true });
+                try { fs.linkSync(from, to); } catch { fs.copyFileSync(from, to); } // different drive -> copy
+            }
+            names.push(f.slice(0, -'.safetensors'.length));
+        }
+        await forgePost('/sdapi/v1/refresh-loras', {});
+
+        const csv = files.find(f => f.endsWith('_losses.csv'));
+        const losses = csv
+            ? fs.readFileSync(path.join(src, csv), 'utf8').trim().split(/\r?\n/).slice(1).map(l => {
+                const [epoch, train, val] = l.split(',');
+                return { epoch: +epoch, train: +train, val: val ? +val : null };
+            })
+            : [];
+        res.json({ names, losses });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.post('/api/jobs/:name/generate', async (req, res) => {
     try {
         const jobName = sanitizeName(req.params.name);
@@ -1404,6 +1490,8 @@ app.post('/api/jobs/:name/generate', async (req, res) => {
 
             const oneShotAppendLog = (data) => {
                 const text = data.toString();
+                // Also stream to the terminal so you can see it live
+                process.stdout.write(text);
                 oneShotLogStream.write(text);
                 broadcastLog(jobName, text);
             };
@@ -1596,6 +1684,8 @@ app.post('/api/jobs/:name/train/start', async (req, res) => {
 
         const appendLog = (data) => {
             const text = data.toString();
+            // Also stream to the terminal so you can see it live
+            process.stdout.write(text);
             logBuffer.push(text);
             if (logBuffer.length > MAX_LOG_LINES) logBuffer.shift();
             logStream.write(text);

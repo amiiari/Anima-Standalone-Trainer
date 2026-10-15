@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compare Epochs</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script>
+        const t = localStorage.getItem('ui_theme');
+        if (t) document.documentElement.setAttribute('data-theme', t);
+    </script>
+    <style>
+        :root { --s-val: #3987e5; --s-train: #d95926; }
+        [data-theme="github-light"] { --s-val: #2a78d6; --s-train: #eb6834; }
+        body { background: var(--bg-primary); color: var(--text-primary); overflow: auto; }
+        .wrap { max-width: 1400px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+        .panel { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+        .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+        .row .form-group { margin: 0; }
+        #drop { border: 2px dashed var(--border); border-radius: var(--radius); padding: 24px; text-align: center; cursor: pointer; color: var(--text-secondary); }
+        #drop.over { border-color: var(--accent); color: var(--accent); }
+        #drop img { max-height: 260px; max-width: 100%; display: block; margin: 0 auto 8px; border-radius: 6px; }
+        textarea { width: 100%; min-height: 70px; font-family: inherit; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+        .card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+        .card.best { border-color: var(--success); }
+        .card header { padding: 8px 10px; display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+        .card header span { color: var(--text-secondary); }
+        .card .img { aspect-ratio: 2/3; display: grid; place-items: center; color: var(--text-muted); font-size: 13px; background: var(--bg-tertiary); }
+        .card img { width: 100%; display: block; cursor: zoom-in; }
+        #chart { width: 100%; height: 260px; display: block; }
+        #chart text { fill: var(--text-secondary); font-size: 11px; }
+        .legend { display: flex; gap: 16px; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; }
+        .legend i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 6px; }
+        #tip { position: fixed; pointer-events: none; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; display: none; z-index: 10; }
+        #status { color: var(--text-secondary); font-size: 13px; }
+        details summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; margin-top: 8px; }
+        table { border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+        td, th { padding: 2px 12px 2px 0; text-align: left; }
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+        <div class="row" style="justify-content: space-between; align-items: center;">
+            <h2 style="margin:0">Compare Epochs in Forge</h2>
+            <a href="/" class="btn btn-ghost btn-sm">← Back to trainer</a>
+        </div>
+
+        <div class="panel">
+            <div class="row">
+                <div class="form-group"><label title="Your Forge, started with --api">Forge URL</label><input id="forge-url" type="text" placeholder="http://127.0.0.1:7860" style="width:200px"></div>
+                <div class="form-group"><label>Job</label><select id="job"></select></div>
+                <div class="form-group"><label>LoRA weight</label><input id="weight" type="number" value="1" step="0.05" style="width:90px"></div>
+                <div class="form-group"><label title="Render a no-LoRA image too, to see how far each epoch moved from the base model"><input id="baseline" type="checkbox" checked> No-LoRA baseline</label></div>
+                <button id="run" class="btn btn-primary">Render all epochs</button>
+                <button id="stop" class="btn btn-secondary" disabled>Stop</button>
+                <span id="status"></span>
+            </div>
+        </div>
+
+        <div class="panel" style="display:grid; gap:12px; grid-template-columns: minmax(240px, 1fr) 2fr;">
+            <div id="drop">Drop a Forge image here (or click)<br><small>Its prompt, seed, sampler, size, model etc. are read from the image</small></div>
+            <div class="form-group" style="margin:0">
+                <label>Prompt (each run appends <code>&lt;lora:EPOCH:weight&gt;</code> — delete any old version of this LoRA here)</label>
+                <textarea id="prompt" placeholder="Drop an image first"></textarea>
+                <label style="margin-top:8px">Negative prompt</label>
+                <textarea id="negative" style="min-height:40px"></textarea>
+                <details><summary>Full infotext sent to Forge</summary><pre id="infotext" style="white-space:pre-wrap;font-size:12px"></pre></details>
+            </div>
+        </div>
+
+        <div class="panel" id="loss-panel" hidden>
+            <div class="legend"><span><i style="background:var(--s-val)"></i>Validation loss (fixed seed — use this one)</span><span><i style="background:var(--s-train)"></i>Train loss (noisy)</span></div>
+            <svg id="chart" role="img" aria-label="Loss per epoch"></svg>
+            <details><summary>Table</summary><table id="loss-table"></table></details>
+            <small id="loss-note" style="color:var(--text-secondary)"></small>
+        </div>
+
+        <div class="grid" id="grid"></div>
+    </div>
+    <div id="tip"></div>
+    <input type="file" id="file" accept="image/*" hidden>
+
+    <script>
+        const $ = (id) => document.getElementById(id);
+        const api = async (url, body) => {
+            const r = await fetch(url, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+            const j = await r.json();
+            if (!r.ok) throw new Error(j.error || r.statusText);
+            return j;
+        };
+        let infotext = '', stopped = false, losses = [];
+
+        // ---- forge url (saved to [forge] url in global_config.toml) ----
+        api('/api/global-config').then(c => { $('forge-url').value = c.forge?.url || 'http://127.0.0.1:7860'; });
+        $('forge-url').onchange = async () => {
+            const c = await api('/api/global-config');
+            c.forge = { ...c.forge, url: $('forge-url').value.trim() };
+            await fetch('/api/global-config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(c) });
+            loadJob();
+        };
+
+        // ---- jobs ----
+        api('/api/jobs').then(jobs => {
+            $('job').innerHTML = jobs.map(j => `<option>${j.name}</option>`).join('');
+            const saved = localStorage.getItem('compare_job');
+            if (jobs.some(j => j.name === saved)) $('job').value = saved;
+            loadJob();
+        });
+        $('job').onchange = () => { localStorage.setItem('compare_job', $('job').value); loadJob(); };
+
+        // epoch number from "name-000004"; the final save has no suffix
+        const epochOf = (n) => { const m = n.match(/-(\d+)$/); return m ? +m[1] : Infinity; };
+
+        async function loadJob() {
+            $('grid').innerHTML = '';
+            $('status').textContent = 'Linking checkpoints into Forge…';
+            try {
+                const { names, losses: l } = await api(`/api/jobs/${encodeURIComponent($('job').value)}/forge-link`, {});
+                losses = l;
+                names.sort((a, b) => epochOf(a) - epochOf(b));
+                renderLosses();
+                const finalEpoch = losses.length ? losses[losses.length - 1].epoch : null;
+                const runs = names.map(n => ({ name: n, epoch: epochOf(n) === Infinity ? finalEpoch : epochOf(n) }));
+                $('grid').dataset.runs = JSON.stringify(runs);
+                renderCards(runs);
+                $('status').textContent = `${names.length} checkpoint(s) available in Forge`;
+            } catch (e) { $('status').textContent = e.message; }
+        }
+
+        function bestEpoch() {
+            const v = losses.filter(r => r.val != null);
+            return v.length ? v.reduce((a, b) => (b.val < a.val ? b : a)).epoch : null;
+        }
+
+        function renderCards(runs) {
+            const best = bestEpoch();
+            const cards = ($('baseline').checked ? [{ name: null, epoch: null }] : []).concat(runs);
+            $('grid').innerHTML = cards.map((r, i) => {
+                const l = losses.find(x => x.epoch === r.epoch);
+                const label = r.name === null ? 'No LoRA' : (r.epoch != null ? `Epoch ${r.epoch}` : r.name);
+                const meta = l ? (l.val != null ? `val ${l.val.toFixed(4)}` : `train ${l.train.toFixed(4)}`) : '';
+                return `<div class="card${r.epoch != null && r.epoch === best ? ' best' : ''}" id="card-${r.epoch}">
+                    <header><strong title="${r.name || ''}">${label}${r.epoch != null && r.epoch === best ? ' ★' : ''}</strong><span>${meta}</span></header>
+                    <div class="img" id="img-${i}">waiting</div></div>`;
+            }).join('');
+            return cards;
+        }
+
+        // ---- drop image ----
+        const drop = $('drop');
+        drop.onclick = () => $('file').click();
+        $('file').onchange = (e) => e.target.files[0] && readImage(e.target.files[0]);
+        drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
+        drop.ondragleave = () => drop.classList.remove('over');
+        drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); e.dataTransfer.files[0] && readImage(e.dataTransfer.files[0]); };
+
+        function readImage(file) {
+            const reader = new FileReader();
+            reader.onload = async () => {
+                drop.innerHTML = `<img src="${reader.result}">${file.name}`;
+                try {
+                    const info = await api('/api/forge/png-info', { image: reader.result });
+                    if (!info.info) throw new Error('No generation info in this image (needs a PNG saved by Forge/A1111 with metadata)');
+                    infotext = info.info;
+                    $('infotext').textContent = infotext;
+                    $('prompt').value = info.parameters.Prompt || '';
+                    $('negative').value = info.parameters['Negative prompt'] || '';
+                    $('status').textContent = 'Image loaded';
+                } catch (e) { $('status').textContent = e.message; }
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // ---- render ----
+        $('stop').onclick = () => { stopped = true; $('status').textContent = 'Stopping after current image…'; };
+        $('run').onclick = async () => {
+            if (!infotext) { $('status').textContent = 'Drop an image first'; return; }
+            const runs = JSON.parse($('grid').dataset.runs || '[]');
+            const cards = renderCards(runs);
+            stopped = false; $('run').disabled = true; $('stop').disabled = false;
+            for (let i = 0; i < cards.length && !stopped; i++) {
+                const c = cards[i], cell = $(`img-${i}`);
+                cell.textContent = 'rendering…';
+                $('status').textContent = `Rendering ${i + 1}/${cards.length}`;
+                const prompt = c.name === null ? $('prompt').value : `${$('prompt').value} <lora:${c.name}:${$('weight').value}>`;
+                try {
+                    const r = await api('/api/forge/txt2img', {
+                        infotext, prompt, negative_prompt: $('negative').value,
+                        batch_size: 1, n_iter: 1, save_images: false, send_images: true,
+                        // Forge Neo's infotext parser crashes on list-typed fields, so set those ourselves
+                        styles: [], hr_additional_modules: ['Use same choices'],
+                    });
+                    cell.innerHTML = `<img src="data:image/png;base64,${r.images[0]}">`;
+                    cell.querySelector('img').onclick = (e) => window.open().document.write(`<img src="${e.target.src}" style="max-width:100%">`);
+                } catch (e) { cell.textContent = e.message; }
+            }
+            $('status').textContent = stopped ? 'Stopped' : 'Done';
+            $('run').disabled = false; $('stop').disabled = true;
+        };
+        $('baseline').onchange = () => renderCards(JSON.parse($('grid').dataset.runs || '[]'));
+
+        // ---- loss chart ----
+        function renderLosses() {
+            $('loss-panel').hidden = !losses.length;
+            if (!losses.length) return;
+            const hasVal = losses.some(r => r.val != null);
+            $('loss-note').textContent = hasVal
+                ? `Lowest validation loss: epoch ${bestEpoch()} (★). It usually bottoms out then climbs as the LoRA overfits — check the images around that point.`
+                : 'No validation loss logged. Set "Validation Split" (e.g. 0.1) in the job\'s dataset settings to get a reliable curve; train loss alone is too noisy to pick epochs.';
+            $('loss-table').innerHTML = '<tr><th>Epoch</th><th>Val</th><th>Train</th></tr>' +
+                losses.map(r => `<tr><td>${r.epoch}</td><td>${r.val?.toFixed(4) ?? '—'}</td><td>${r.train.toFixed(4)}</td></tr>`).join('');
+
+            const svg = $('chart'), W = svg.clientWidth || 800, H = 260, P = { l: 52, r: 56, t: 10, b: 26 };
+            const ys = losses.flatMap(r => [r.train, r.val]).filter(v => v != null);
+            let lo = Math.min(...ys), hi = Math.max(...ys); const pad = (hi - lo) * 0.1 || 0.01; lo -= pad; hi += pad;
+            const e0 = losses[0].epoch, e1 = losses[losses.length - 1].epoch;
+            const x = (e) => P.l + (e1 === e0 ? 0.5 : (e - e0) / (e1 - e0)) * (W - P.l - P.r);
+            const y = (v) => P.t + (1 - (v - lo) / (hi - lo)) * (H - P.t - P.b);
+            const line = (k, color, label) => {
+                const pts = losses.filter(r => r[k] != null);
+                if (!pts.length) return '';
+                const last = pts[pts.length - 1];
+                return `<polyline fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" points="${pts.map(r => `${x(r.epoch)},${y(r[k])}`).join(' ')}"/>` +
+                    pts.map(r => `<circle cx="${x(r.epoch)}" cy="${y(r[k])}" r="4" fill="${color}" stroke="var(--bg-secondary)" stroke-width="2"/>`).join('') +
+                    `<text x="${x(last.epoch) + 8}" y="${y(last[k]) + 4}">${label}</text>`;
+            };
+            let grid = '';
+            for (let i = 0; i <= 4; i++) {
+                const v = lo + (hi - lo) * i / 4;
+                grid += `<line x1="${P.l}" x2="${W - P.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--border)" stroke-width="1"/><text x="${P.l - 6}" y="${y(v) + 4}" text-anchor="end">${v.toFixed(3)}</text>`;
+            }
+            const step = Math.max(1, Math.ceil(losses.length / 12));
+            losses.forEach((r, i) => { if (i % step === 0 || i === losses.length - 1) grid += `<text x="${x(r.epoch)}" y="${H - 6}" text-anchor="middle">${r.epoch}</text>`; });
+            const best = bestEpoch();
+            const bestMark = best != null ? `<line x1="${x(best)}" x2="${x(best)}" y1="${P.t}" y2="${H - P.b}" stroke="var(--success)" stroke-dasharray="4 4"/>` : '';
+            svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+            svg.innerHTML = grid + bestMark + line('train', 'var(--s-train)', 'train') + line('val', 'var(--s-val)', 'val') +
+                `<line id="xhair" y1="${P.t}" y2="${H - P.b}" stroke="var(--text-muted)" visibility="hidden"/>` +
+                `<rect x="${P.l}" y="0" width="${W - P.l - P.r}" height="${H}" fill="transparent" id="hit"/>`;
+
+            // hover: nearest epoch → crosshair + tooltip; click → jump to that epoch's image
+            const nearest = (ev) => {
+                const px = (ev.clientX - svg.getBoundingClientRect().left) * (W / svg.clientWidth);
+                return losses.reduce((a, b) => (Math.abs(x(b.epoch) - px) < Math.abs(x(a.epoch) - px) ? b : a));
+            };
+            const hit = $('hit'), xh = $('xhair'), tip = $('tip');
+            hit.onmousemove = (ev) => {
+                const r = nearest(ev);
+                xh.setAttribute('x1', x(r.epoch)); xh.setAttribute('x2', x(r.epoch)); xh.setAttribute('visibility', 'visible');
+                tip.style.display = 'block'; tip.style.left = ev.clientX + 12 + 'px'; tip.style.top = ev.clientY + 12 + 'px';
+                tip.innerHTML = `<strong>Epoch ${r.epoch}</strong><br>val ${r.val?.toFixed(4) ?? '—'}<br>train ${r.train.toFixed(4)}`;
+            };
+            hit.onmouseleave = () => { tip.style.display = 'none'; xh.setAttribute('visibility', 'hidden'); };
+            hit.onclick = (ev) => $(`card-${nearest(ev).epoch}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        window.onresize = () => losses.length && renderLosses();
+    </script>
+</body>
+
+</html>

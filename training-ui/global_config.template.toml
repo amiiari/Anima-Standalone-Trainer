@@ -20,3 +20,7 @@ blur_level = 0
 text_shadow_size = 0
 theme = "github-dark"
 
+[forge]
+# Compare page (compare.html). Forge must run with --api on this PC.
+url = "http://127.0.0.1:7860"
+# lora_dir = ""  # optional; found from Forge automatically
