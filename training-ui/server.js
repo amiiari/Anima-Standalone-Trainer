@@ -22,9 +22,16 @@ const DEFAULT_PORT = portArg
 
 // Paths
 const ROOT_DIR = path.join(__dirname, '..');
-const JOBS_DIR = path.join(__dirname, 'jobs');
 const TEMPLATES_DIR = path.join(__dirname, 'templates');
 const GLOBAL_CONFIG_PATH = path.join(__dirname, 'global_config.toml');
+// jobs_dir in global_config.toml moves jobs out of the trainer (e.g. a LoRAs/<client>/<job> library); read at startup
+const JOBS_DIR = (() => {
+    try {
+        const dir = TOML.parse(fs.readFileSync(GLOBAL_CONFIG_PATH, 'utf8')).jobs_dir;
+        if (dir) return path.resolve(__dirname, dir);
+    } catch (e) { }
+    return path.join(__dirname, 'jobs');
+})();
 const UPLOAD_DIR = path.join(__dirname, 'public', 'uploads');
 const ARCHITECTURES_PATH = path.join(__dirname, 'architectures.json');
 
@@ -90,10 +97,12 @@ const wsClients = new Map(); // jobName -> Set<ws>
 
 // --- Helper Functions ---
 
+// Job ids are "job" or "client/job" (a job inside a client folder)
 function sanitizeName(name) {
-    let safe = name.replace(/[<>:"/\\|?*]/g, '').trim();
-    if (!safe) safe = 'job_' + Date.now();
-    return safe;
+    const parts = String(name).split(/[\\/]/)
+        .map(p => p.replace(/[<>:"|?*]/g, '').trim())
+        .filter(p => p && p !== '.' && p !== '..');
+    return parts.slice(-2).join('/') || 'job_' + Date.now();
 }
 
 function stripQuotes(p) {
@@ -586,8 +595,17 @@ app.get('/api/system/gpus', async (req, res) => {
 app.get('/api/jobs', (req, res) => {
     try {
         if (!fs.existsSync(JOBS_DIR)) return res.json([]);
-        const jobs = fs.readdirSync(JOBS_DIR, { withFileTypes: true })
-            .filter(d => d.isDirectory())
+        // a folder with config.toml is a job; any other folder is a client holding jobs (and its dataset/)
+        const ids = [];
+        for (const d of fs.readdirSync(JOBS_DIR, { withFileTypes: true })) {
+            if (!d.isDirectory()) continue;
+            if (fs.existsSync(path.join(JOBS_DIR, d.name, 'config.toml'))) { ids.push(d.name); continue; }
+            for (const j of fs.readdirSync(path.join(JOBS_DIR, d.name), { withFileTypes: true })) {
+                if (j.isDirectory() && fs.existsSync(path.join(JOBS_DIR, d.name, j.name, 'config.toml'))) ids.push(`${d.name}/${j.name}`);
+            }
+        }
+        const jobs = ids
+            .map(name => ({ name }))
             .map(d => {
                 const configPath = path.join(JOBS_DIR, d.name, 'config.toml');
                 const hasConfig = fs.existsSync(configPath);
@@ -633,6 +651,14 @@ app.post('/api/jobs', (req, res) => {
         fs.writeFileSync(path.join(jobPath, 'config.toml'), TOML.stringify(config), 'utf8');
 
         const datasetConfig = getDefaultDataset();
+        const clientDatasets = safeName.includes('/') && path.join(JOBS_DIR, safeName.split('/')[0], 'dataset');
+        if (clientDatasets && fs.existsSync(clientDatasets)) {
+            const latest = fs.readdirSync(clientDatasets, { withFileTypes: true })
+                .filter(d => d.isDirectory()).map(d => d.name)
+                .sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).pop();
+            const subset = [].concat(datasetConfig.datasets || [])[0]?.subsets?.[0];
+            if (latest && subset) subset.image_dir = path.join(clientDatasets, latest, 'COMPILED');
+        }
         fs.writeFileSync(path.join(jobPath, 'dataset.toml'), TOML.stringify(datasetConfig), 'utf8');
 
         // Copy sample prompts template
@@ -725,6 +751,10 @@ app.post('/api/jobs/:name/clone', (req, res) => {
         }
 
         let targetName = req.body.newName ? sanitizeName(req.body.newName) : null;
+        // a clone stays in its source's client folder unless the new name says otherwise
+        if (targetName && sourceName.includes('/') && !targetName.includes('/')) {
+            targetName = `${sourceName.split('/')[0]}/${targetName}`;
+        }
 
         // Auto-generate name if not provided
         if (!targetName) {
@@ -761,7 +791,7 @@ app.post('/api/jobs/:name/clone', (req, res) => {
 
             // Sync output_name with new job name
             if (!config.training_arguments) config.training_arguments = {};
-            config.training_arguments.output_name = targetName;
+            config.training_arguments.output_name = targetName.split('/').pop();
 
             fs.writeFileSync(path.join(targetPath, 'config.toml'), TOML.stringify(config), 'utf8');
         }
@@ -1755,7 +1785,7 @@ function collectImages(dir, relBase, jobName) {
                 name: entry.name,
                 dir: relBase.replace(/\\/g, '/'),
                 mtime: stat.mtimeMs,
-                path: `/api/jobs/${jobName}/samples/${relPath}`
+                path: `/api/jobs/${encodeURIComponent(jobName)}/samples/${relPath}`
             });
         }
     });

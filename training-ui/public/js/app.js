@@ -31,7 +31,7 @@ async function deleteSamples(paths) {
       // Path is /api/jobs/:name/samples/samples/filename.png
       const parts = fullPath.split("/samples/");
       const relPath = parts[parts.length - 1];
-      await fetch(`/api/jobs/${currentJob}/samples/${relPath}`, {
+      await fetch(`/api/jobs/${encodeURIComponent(currentJob)}/samples/${relPath}`, {
         method: "DELETE",
       });
     }
@@ -250,12 +250,24 @@ async function loadJobs() {
       '<div style="padding:20px;text-align:center;color:var(--text-muted)">No jobs yet</div>';
     return;
   }
+  // "client/job" ids are grouped under a client header, alphabetically; plain jobs come first
+  jobs.sort((a, b) => (a.name.includes("/") - b.name.includes("/")) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+  let lastClient = null;
   jobs.forEach((job) => {
+    const [client, short] = job.name.includes("/") ? job.name.split("/") : [null, job.name];
+    if (client && client !== lastClient) {
+      const h = document.createElement("div");
+      h.className = "job-client";
+      h.textContent = client;
+      jobListEl.appendChild(h);
+    }
+    lastClient = client;
     const el = document.createElement("div");
-    el.className = `job-item${job.name === currentJob ? " active" : ""}${job.running ? " running" : ""}`;
+    el.className = `job-item${job.name === currentJob ? " active" : ""}${job.running ? " running" : ""}${client ? " in-client" : ""}`;
+    el.dataset.job = job.name;
     el.innerHTML = `
             <div class="status-dot"></div>
-            <span class="job-name">${job.name}</span>
+            <span class="job-name">${short}</span>
         `;
     el.addEventListener("click", () => selectJob(job.name));
     jobListEl.appendChild(el);
@@ -279,13 +291,13 @@ async function selectJob(name) {
     await loadGPUs();
     await loadGenGPUs();
     // Load job data
-    const data = await api(`/api/jobs/${name}`);
+    const data = await api(`/api/jobs/${encodeURIComponent(name)}`);
     populateConfig(data.config);
     populateDataset(data.dataset);
     // Load prompts
     await loadPrompts();
     // Check run status
-    const status = await api(`/api/jobs/${name}/train/status`);
+    const status = await api(`/api/jobs/${encodeURIComponent(name)}/train/status`);
     updateRunningState(status.running);
     // Set default negative prompt if no saved value exists for this job
     const savedTransient = localStorage.getItem(`prompt_transient_${name}`);
@@ -325,8 +337,7 @@ function updateRunningState(running) {
   $("btn-stop").classList.toggle("hidden", !running);
   // Update sidebar dot
   document.querySelectorAll(".job-item").forEach((el) => {
-    const name = el.querySelector(".job-name").textContent;
-    if (name === currentJob) {
+    if (el.dataset.job === currentJob) {
       el.classList.toggle("running", running);
     }
   });
@@ -1069,7 +1080,7 @@ async function saveJob() {
     return;
   }
   // Save Config & Dataset
-  await api(`/api/jobs/${currentJob}`, {
+  await api(`/api/jobs/${encodeURIComponent(currentJob)}`, {
     method: "PUT",
     body: { config, dataset },
   });
@@ -1159,7 +1170,7 @@ document.addEventListener("input", (e) => {
 let currentPrompts = []; // Array of objects { text, w, h, s, l, d }
 async function loadPrompts() {
   if (!currentJob) return;
-  const data = await api(`/api/jobs/${currentJob}/prompts`);
+  const data = await api(`/api/jobs/${encodeURIComponent(currentJob)}/prompts`);
   // Parse strings into objects
   currentPrompts = (data.prompts || []).map((line) => parsePromptLine(line));
   renderPrompts();
@@ -1209,7 +1220,7 @@ async function savePrompts() {
     (p) => p.text && p.text.trim().length > 0,
   );
   const lines = validPrompts.map(serializePrompt);
-  await api(`/api/jobs/${currentJob}/prompts`, {
+  await api(`/api/jobs/${encodeURIComponent(currentJob)}/prompts`, {
     method: "PUT",
     body: { prompts: lines },
   });
@@ -1442,7 +1453,7 @@ function appendConsole(text) {
 async function loadCheckpoints() {
   if (!currentJob) return;
   const jobAtStart = currentJob;
-  const files = await api(`/api/jobs/${currentJob}/checkpoints`);
+  const files = await api(`/api/jobs/${encodeURIComponent(currentJob)}/checkpoints`);
   if (currentJob !== jobAtStart) return; // job changed while fetching
   const select = $("gen-lora-select");
   // Save current selection
@@ -1480,7 +1491,7 @@ let sampleState = {
 };
 async function loadSamples(isUpdate = false) {
   if (!currentJob) return;
-  const images = await api(`/api/jobs/${currentJob}/samples`);
+  const images = await api(`/api/jobs/${encodeURIComponent(currentJob)}/samples`);
   const container = $("samples-grid");
   const empty = $("samples-empty");
   if (!images || images.length === 0) {
@@ -2099,7 +2110,7 @@ function addDoubleClick(element, callback) {
 let tbUrl = null;
 async function checkTensorBoard() {
   if (!currentJob) return;
-  const status = await api(`/api/jobs/${currentJob}/tensorboard/status`);
+  const status = await api(`/api/jobs/${encodeURIComponent(currentJob)}/tensorboard/status`);
   updateTbState(status.running, status.url);
 }
 function updateTbState(running, url) {
@@ -2129,7 +2140,7 @@ async function launchTensorBoard() {
   if (!currentJob) return;
   $("btn-tb-launch").disabled = true;
   $("btn-tb-launch").textContent = "Starting...";
-  const result = await api(`/api/jobs/${currentJob}/tensorboard`, {
+  const result = await api(`/api/jobs/${encodeURIComponent(currentJob)}/tensorboard`, {
     method: "POST",
   });
   if (result.error) {
@@ -2148,7 +2159,7 @@ async function launchTensorBoard() {
 }
 async function stopTensorBoard() {
   if (!currentJob) return;
-  await api(`/api/jobs/${currentJob}/tensorboard/stop`, { method: "POST" });
+  await api(`/api/jobs/${encodeURIComponent(currentJob)}/tensorboard/stop`, { method: "POST" });
   updateTbState(false, null);
   showToast("TensorBoard stopped");
 }
@@ -2610,7 +2621,8 @@ if (btnAddDataset) {
 }
 // New Job
 $("btn-new-job").addEventListener("click", () => {
-  $("new-job-name").value = "my_job";
+  // new jobs land in the current job's client folder by default ("client/name")
+  $("new-job-name").value = currentJob?.includes("/") ? `${currentJob.split("/")[0]}/` : "my_job";
   openModal("modal-new-job");
   $("new-job-name").focus();
 });
@@ -3030,11 +3042,7 @@ $("btn-clone").addEventListener("click", () => {
   let defaultName = `${currentJob}_copy`;
   let counter = 1;
   const uniqueName = (base) => {
-    const jobItems = document.querySelectorAll(".job-name");
-    for (let item of jobItems) {
-      if (item.textContent === base) return false;
-    }
-    return true;
+    return ![...document.querySelectorAll(".job-item")].some((el) => el.dataset.job === base);
   };
   while (!uniqueName(defaultName)) {
     counter++;
@@ -3050,7 +3058,7 @@ $("btn-clone").addEventListener("click", () => {
 $("btn-confirm-clone").addEventListener("click", async () => {
   const newName = $("clone-job-name").value.trim();
   if (!newName) return;
-  const result = await api(`/api/jobs/${currentJob}/clone`, {
+  const result = await api(`/api/jobs/${encodeURIComponent(currentJob)}/clone`, {
     method: "POST",
     body: { newName: newName },
   });
@@ -3079,7 +3087,7 @@ $("btn-delete").addEventListener("click", () => {
     `Delete "${currentJob}" and all its files? This cannot be undone.`,
     async () => {
       const deletedJob = currentJob;
-      await api(`/api/jobs/${deletedJob}`, { method: "DELETE" });
+      await api(`/api/jobs/${encodeURIComponent(deletedJob)}`, { method: "DELETE" });
       // Clean up all localStorage keys for the deleted job
       localStorage.removeItem(`prompt_transient_${deletedJob}`);
       localStorage.removeItem(`sample_order_${deletedJob}`);
@@ -3106,7 +3114,7 @@ $("btn-run").addEventListener("click", async () => {
   }
   // Auto-save first
   if (isDirty) await saveJob();
-  const result = await api(`/api/jobs/${currentJob}/train/start`, {
+  const result = await api(`/api/jobs/${encodeURIComponent(currentJob)}/train/start`, {
     method: "POST",
   });
   if (result.error) {
@@ -3141,7 +3149,7 @@ $("btn-gen-sample").addEventListener("click", async () => {
   payload.sage_attn = $("gen-sage-attn").checked;
   payload.gen_gpu_ids = getSelectedGenGPUs();
   payload.gen_multi_gpu_mode = $("gen-multi-gpu-mode").value;
-  const result = await api(`/api/jobs/${currentJob}/generate`, {
+  const result = await api(`/api/jobs/${encodeURIComponent(currentJob)}/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: Object.assign(payload, {
@@ -3161,7 +3169,7 @@ $("btn-gen-sample").addEventListener("click", async () => {
 $("btn-unload-model").addEventListener("click", async () => {
   if (!currentJob) return;
   showToast("Unloading model...");
-  const result = await api(`/api/jobs/${currentJob}/unload`, {
+  const result = await api(`/api/jobs/${encodeURIComponent(currentJob)}/unload`, {
     method: "POST",
   });
   if (result.success) {
@@ -3181,7 +3189,7 @@ $("btn-stop").addEventListener("click", () => {
     "Stop Training",
     `Stop training for "${currentJob}"?`,
     async () => {
-      await api(`/api/jobs/${currentJob}/train/stop`, { method: "POST" });
+      await api(`/api/jobs/${encodeURIComponent(currentJob)}/train/stop`, { method: "POST" });
       updateRunningState(false);
       showToast("Training stopped");
     },
@@ -3238,7 +3246,7 @@ $("btn-apply-global").addEventListener("click", applyGlobalSettings);
 // Job Settings
 $("btn-open-folder").addEventListener("click", async () => {
   if (!currentJob) return;
-  await api(`/api/jobs/${currentJob}/open-folder`, { method: "POST" });
+  await api(`/api/jobs/${encodeURIComponent(currentJob)}/open-folder`, { method: "POST" });
 });
 $("btn-clear-logs").addEventListener("click", () => {
   if (!currentJob) return;
@@ -3246,7 +3254,7 @@ $("btn-clear-logs").addEventListener("click", () => {
     "Clear Logs",
     "Delete all TensorBoard logs for this job?",
     async () => {
-      await api(`/api/jobs/${currentJob}/clear-logs`, { method: "POST" });
+      await api(`/api/jobs/${encodeURIComponent(currentJob)}/clear-logs`, { method: "POST" });
       showToast("Logs cleared");
     },
   );
@@ -3257,7 +3265,7 @@ $("btn-reset-config").addEventListener("click", () => {
     "Reset Config",
     "Reset all settings to template defaults?",
     async () => {
-      await api(`/api/jobs/${currentJob}/reset-config`, { method: "POST" });
+      await api(`/api/jobs/${encodeURIComponent(currentJob)}/reset-config`, { method: "POST" });
       selectJob(currentJob);
       showToast("Config reset to defaults");
     },
@@ -3442,9 +3450,9 @@ async function init() {
   // Restore Job
   const lastJob = localStorage.getItem("lastJob");
   if (lastJob) {
-    const jobExists = Array.from(
-      document.querySelectorAll(".job-item .job-name"),
-    ).some((el) => el.textContent === lastJob);
+    const jobExists = Array.from(document.querySelectorAll(".job-item")).some(
+      (el) => el.dataset.job === lastJob,
+    );
     if (jobExists) {
       await selectJob(lastJob);
     } else {

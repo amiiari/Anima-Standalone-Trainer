@@ -1,3 +1,5 @@
+# Where jobs live. Default: training-ui/jobs. Can hold client folders: <jobs_dir>/<client>/<job> (+ <client>/dataset/)
+jobs_dir = ""
 venv_path = ""
 
 [model_paths]

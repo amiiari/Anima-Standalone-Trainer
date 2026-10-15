@@ -259,10 +259,13 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
             .sort((a, b) => a.n - b.n);
     }
 
-    // compiler.py, in place: images from any category folder, captions = each category's tags in folder order
+    // _tools/compiler.py, in place: images from images/ (or, in older datasets, any category folder),
+    // captions = trigger.txt + each category's tags in folder order
     function compileCategories(base) {
         const merged = {};
         const images = {};
+        const imgDir = path.join(base, 'images');
+        if (fs.existsSync(imgDir)) for (const f of fs.readdirSync(imgDir)) if (IMAGE_EXT.test(f)) images[f] = path.join(imgDir, f);
         for (const c of categoryDirs(base)) {
             for (const f of fs.readdirSync(c.dir)) {
                 if (IMAGE_EXT.test(f)) images[f] ||= path.join(c.dir, f);
@@ -272,7 +275,11 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
                 }
             }
         }
-        return { images, captions: Object.fromEntries(Object.entries(merged).map(([f, parts]) => [f, parts.join(', ')])) };
+        // trigger.txt (e.g. "@jennieart") goes first in every caption, like _tools/compiler.py
+        const tf = path.join(base, 'trigger.txt');
+        const trigger = fs.existsSync(tf) ? fs.readFileSync(tf, 'utf8').trim() : '';
+        const caption = (parts) => (trigger && !parts[0].startsWith(trigger) ? [trigger, ...parts] : parts).join(', ');
+        return { images, captions: Object.fromEntries(Object.entries(merged).map(([f, parts]) => [f, caption(parts)])) };
     }
 
     // Captions (compiled + per category) and 256px thumbnails, copied at training start so a job
@@ -344,7 +351,7 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
             }
             if (depth >= 4) return;
             for (const e of entries) {
-                if (e.isDirectory() && !/^(venv|node_modules|\.git|jobs|output|__pycache__)$/.test(e.name) && !/^\d+\.\s/.test(e.name)) walk(path.join(d, e.name), depth + 1);
+                if (e.isDirectory() && !/^(venv|node_modules|\.git|jobs|output|__pycache__|snapshots|compare|images|COMPILED)$/.test(e.name) && !/^\d+\.\s/.test(e.name)) walk(path.join(d, e.name), depth + 1);
             }
         };
         walk(searchRoot, 0);
@@ -498,7 +505,11 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
             const { images, captions } = compileCategories(dir);
             dir = path.join(dir, 'COMPILED');
             fs.mkdirSync(dir, { recursive: true });
-            for (const [f, src] of Object.entries(images)) if (!fs.existsSync(path.join(dir, f))) fs.copyFileSync(src, path.join(dir, f));
+            for (const [f, src] of Object.entries(images)) {
+                const to = path.join(dir, f);
+                if (fs.existsSync(to)) continue;
+                try { fs.linkSync(src, to); } catch { fs.copyFileSync(src, to); } // hardlink: no second copy on disk
+            }
             for (const [f, text] of Object.entries(captions)) fs.writeFileSync(path.join(dir, f), text);
         }
         const p = path.join(jobDir(job), 'dataset.toml');
