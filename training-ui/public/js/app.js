@@ -357,7 +357,6 @@ function populateConfig(config) {
   } else {
     $("cfg-optimizer").value = t.optimizer_type || "AdamW8bit";
   }
-  $("cfg-loss-indicator").checked = t.validate_on_train_images ?? true;
   $("cfg-lr-scheduler").value = t.lr_scheduler || "cosine";
   $("cfg-lr-warmup").value = t.lr_warmup_steps ?? 100;
   $("cfg-lr-scheduler-cycles").value = t.lr_scheduler_num_cycles ?? 1;
@@ -549,15 +548,19 @@ function populateConfig(config) {
   $("cfg-sample-every-steps").value = sampleIntervalSteps || 100;
   $("group-sample-every").classList.toggle("hidden", !enableSampling);
   syncSamplingTabs();
-  // Validation
-  const enableValidation = (t.validation_split ?? 0) > 0;
+  // Validation: on unless switched off; "train" mode (fixed-noise check on the training images) unless a
+  // hold-out split was chosen
+  const holdout = (t.validation_split ?? 0) > 0 && !t.validate_on_train_images;
+  const enableValidation = holdout || (t.validate_on_train_images ?? true);
   $("cfg-enable-validation").checked = enableValidation;
   $("group-validation").classList.toggle("hidden", !enableValidation);
+  document.querySelector(`input[name="validation-mode"][value="${holdout ? "holdout" : "train"}"]`).checked = true;
+  syncValidationMode();
   $("cfg-validation-split").value = t.validation_split || 0.1;
   $("cfg-validation-seed").value = t.validation_seed ?? 42;
   $("cfg-validate-every-epochs").value = t.validate_every_n_epochs ?? 1;
   $("cfg-validate-every-steps").value = t.validate_every_n_steps ?? 500;
-  $("cfg-max-validation-steps").value = t.max_validation_steps ?? 10;
+  $("cfg-max-validation-steps").value = t.max_validation_steps ?? 8;
   // Anima
   $("cfg-timestep-method").value = a.timestep_sample_method || "logit_normal";
   $("cfg-flow-shift").value = a.discrete_flow_shift ?? 3.0;
@@ -760,8 +763,6 @@ function gatherConfig() {
       text_encoder_lr: safeFloat($("cfg-text-encoder-lr").value),
       optimizer_type: $("cfg-optimizer").value,
       // cap the per-epoch check at 8 fixed batches (x4 timesteps)
-      validate_on_train_images: $("cfg-loss-indicator").checked || undefined,
-      max_validation_steps: $("cfg-loss-indicator").checked ? 8 : undefined,
       optimizer_args: optimizerArgs.length > 0 ? optimizerArgs : undefined,
       // Muon configuration
       use_muon: $("cfg-optimizer").value === "Muon",
@@ -807,9 +808,9 @@ function gatherConfig() {
       }),
       persistent_data_loader_workers: $("cfg-persistent-workers").checked,
       seed: safeInt($("cfg-seed").value),
-      ...($("cfg-enable-validation").checked && {
-        validation_split: safeFloat($("cfg-validation-split").value),
-      }),
+      ...($("cfg-enable-validation").checked && (validationMode() === "holdout"
+        ? { validation_split: safeFloat($("cfg-validation-split").value) }
+        : { validate_on_train_images: true })),
       ...(isEpochs && $("cfg-enable-validation").checked
         ? { validate_every_n_epochs: safeInt($("cfg-validate-every-epochs").value) }
         : {}),
@@ -2871,6 +2872,11 @@ $("cfg-enable-sampling").addEventListener("change", (e) => {
   $("group-sample-every").classList.toggle("hidden", !e.target.checked);
   syncSamplingTabs();
 });
+const validationMode = () => document.querySelector('input[name="validation-mode"]:checked').value;
+function syncValidationMode() {
+  $("container-validation-split").classList.toggle("hidden", validationMode() !== "holdout");
+}
+document.querySelectorAll('input[name="validation-mode"]').forEach((el) => el.addEventListener("change", syncValidationMode));
 $("cfg-enable-validation").addEventListener("change", (e) => {
   $("group-validation").classList.toggle("hidden", !e.target.checked);
 });

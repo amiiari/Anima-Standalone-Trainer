@@ -310,10 +310,12 @@
                 <h4 class="muted" style="margin:8px 0">${esc(s.dir)}${s.exists ? ` · ${s.files.length} images` : ' · folder missing (see banner)'}</h4>
                 <div class="pick">${s.files.map(f => `<img loading="lazy" data-s="${s.subset}" data-f="${esc(f.file)}" title="${esc(f.caption)}" src="${J}/dataset-image?s=${s.subset}&f=${encodeURIComponent(f.file)}">`).join('')}</div>`).join('');
             $('pick-body').querySelectorAll('img').forEach(img => img.onclick = async () => {
-                // keep the template's pixel count, match this image's aspect ratio
-                const tw = data.template?.width || 1024, th = data.template?.height || 1024;
-                const a = img.naturalWidth / img.naturalHeight, area = tw * th;
-                const width = Math.round(Math.sqrt(area * a) / 64) * 64, height = Math.round(Math.sqrt(area / a) / 64) * 64;
+                // render at the original's size (before the template's hires upscale, so the final output matches it),
+                // scaled down only past ~2.4 MP to keep a giant source from running Forge out of memory
+                const hr = data.template?.hrScale || 1;
+                const down = Math.min(1, Math.sqrt(1536 * 1536 / ((img.naturalWidth / hr) * (img.naturalHeight / hr))));
+                const snap = (v) => Math.max(64, Math.round(v * down / hr / 64) * 64);
+                const width = snap(img.naturalWidth), height = snap(img.naturalHeight);
                 img.style.opacity = 0.4;
                 try {
                     const s = await api(`${J}/compare/samples`, 'POST', { kind: 'dataset', subset: +img.dataset.s, file: img.dataset.f, width, height });

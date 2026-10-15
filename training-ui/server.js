@@ -380,7 +380,8 @@ function buildTrainingConfig(jobName, jobPath) {
         ...trainingArgs,
         output_dir: outputDir,
         logging_dir: loggingDir,
-        save_state: true
+        // resume states are ~1.5 GB each: only saved when asked for, or when auto-resume needs them
+        save_state: trainingArgs.save_state ?? !!jobConfig.network_arguments?.auto_resume_last_state
     };
 
     // save_last_n_steps_state is in steps, but the UI field means "N checkpoints".

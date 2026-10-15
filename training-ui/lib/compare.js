@@ -408,6 +408,7 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
             negative: info.parameters['Negative prompt'] || '',
             width: +info.parameters['Size-1'] || 1024,
             height: +info.parameters['Size-2'] || 1024,
+            hrScale: +info.parameters['Hires upscale'] || 1, // dataset samples divide by this so the final size matches the original
             original: 'template.png',
         };
         save(job, cfg);

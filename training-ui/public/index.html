@@ -445,9 +445,6 @@
                                 <label>Caption Extension</label>
                                 <input type="text" id="cfg-caption-ext" value=".txt" placeholder=".txt">
                             </div>
-                            <div class="form-group">
-                                <label title="Each epoch, scores a fixed set of your training images at fixed seeds/timesteps (nothing is held out). Shows up as the loss indicator on the Compare tab: a smooth curve that flattens when the LoRA stops learning. Takes priority over Enable Loss Validation (hold-out) if both are on."><input type="checkbox" id="cfg-loss-indicator" checked> Loss indicator</label>
-                            </div>
                         </div>
 
                         <div class="form-group">
@@ -488,12 +485,17 @@
 
                         <h4>Validation</h4>
                         <div class="form-group">
-                            <label><input type="checkbox" id="cfg-enable-validation"> Enable Loss Validation</label>
-                            <small>Holds out a portion of training data to compute validation loss. Only available with LoRA.</small>
+                            <label><input type="checkbox" id="cfg-enable-validation" checked> Enable Loss Validation</label>
+                            <small>A steadier loss measured each epoch (fixed seed and timesteps), shown on the Compare tab and above the console. Only available with LoRA.</small>
                         </div>
-                        <div id="group-validation" class="hidden" style="padding-left: 16px; border-left: 2px solid var(--border); margin-top: 10px; display: flex; flex-direction: column; gap: 12px;">
+                        <div id="group-validation" style="padding-left: 16px; border-left: 2px solid var(--border); margin-top: 10px; display: flex; flex-direction: column; gap: 12px;">
+                            <div class="form-group">
+                                <label><input type="radio" name="validation-mode" value="train" checked> Training images (nothing held out)</label>
+                                <label><input type="radio" name="validation-mode" value="holdout"> Hold out a split of the images</label>
+                                <small>Training images show when learning flattens; a hold-out split can also show overfitting, but those images are never trained on.</small>
+                            </div>
                             <div class="form-row">
-                                <div class="form-group">
+                                <div class="form-group" id="container-validation-split">
                                     <label>Validation Split</label>
                                     <input type="number" id="cfg-validation-split" value="0.1" min="0.01" max="0.5" step="0.01">
                                 </div>
