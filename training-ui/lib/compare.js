@@ -104,10 +104,13 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
         if (changed) await forge('/sdapi/v1/refresh-loras', {});
     }
 
-    async function unlinkCheckpoints() {
-        const dir = path.join(await forgeLoraDir(), '_trainer');
+    // Only this job's folder: another render pass (another job, another server) may still be using its own
+    async function unlinkCheckpoints(job) {
+        const root = path.join(await forgeLoraDir(), '_trainer');
+        const dir = path.join(root, sanitizeName(job));
         if (!fs.existsSync(dir)) return;
         fs.rmSync(dir, { recursive: true, force: true }); // hardlinks: the job's own files are untouched
+        try { fs.rmdirSync(root); } catch { } // only if empty
         await forge('/sdapi/v1/refresh-loras', {});
     }
 
@@ -233,7 +236,7 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
         try {
             await renderAll(job, cfg, todo, st);
         } finally {
-            await unlinkCheckpoints().catch(e => console.error('[compare] unlink:', e.message));
+            await unlinkCheckpoints(job).catch(e => console.error('[compare] unlink:', e.message));
         }
     }
 
@@ -241,6 +244,8 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
         const baseModel = await trainingBaseModel().catch(() => null);
         for (const { s, c, out } of todo) {
             if (st.stop) return;
+            // Forge renders a missing LoRA as plain base without error, so re-link if the file went away
+            if (c.name !== BASE) await linkCheckpoints(job, [c]);
             st.label = `${c.name === BASE ? 'No LoRA' : c.name} · sample ${cfg.samples.indexOf(s) + 1}`;
             const infotext = s.infotext || cfg.template?.infotext;
             if (!infotext) throw new Error('No Forge settings found: none of the dataset images carry them, so drop a Forge image on "Settings template"');
