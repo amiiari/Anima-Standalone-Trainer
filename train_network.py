@@ -697,6 +697,8 @@ class NetworkTrainer:
                     d.params.validation_split = 0.0
                 for d in val_blueprint.datasets:
                     d.params.validation_split = 1.0
+                    for sub in d.subsets:
+                        sub.params.num_repeats = 1  # score each image once
                 train_dataset_group, _ = config_util.generate_dataset_group_by_blueprint(blueprint.dataset_group)
                 _, val_dataset_group = config_util.generate_dataset_group_by_blueprint(val_blueprint)
             else:
@@ -958,11 +960,16 @@ class NetworkTrainer:
             persistent_workers=args.persistent_data_loader_workers,
         )
 
+        # The validation loader gets its own collator with a frozen epoch: the shared one makes the dataset
+        # reshuffle its buckets every epoch, so each validation pass would score a different subset of images.
+        val_collator = train_util.collator_class(
+            Value("i", 0), Value("i", 0), val_dataset_group if args.max_data_loader_n_workers == 0 else None
+        )
         val_dataloader = torch.utils.data.DataLoader(
             val_dataset_group if val_dataset_group is not None else [],
             shuffle=False,
             batch_size=1,
-            collate_fn=collator,
+            collate_fn=val_collator,
             num_workers=n_workers,
             persistent_workers=args.persistent_data_loader_workers,
         )

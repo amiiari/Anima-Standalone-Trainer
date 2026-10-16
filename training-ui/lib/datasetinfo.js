@@ -38,6 +38,55 @@ function imageSize(file) {
     }
 }
 
+// Forge/A1111 generation settings stored in a PNG ("parameters" tEXt/iTXt/zTXt chunk, before the image data).
+// -> { infotext, negative, width, height, hrScale } or null
+function forgeSettings(file) {
+    if (!/\.png$/i.test(file)) return null;
+    const fd = fs.openSync(file, 'r');
+    let text = null;
+    try {
+        const hdr = Buffer.alloc(8);
+        let pos = 8;
+        while (fs.readSync(fd, hdr, 0, 8, pos) === 8) {
+            const len = hdr.readUInt32BE(0), type = hdr.toString('ascii', 4, 8);
+            if (type === 'IDAT' || type === 'IEND') break;
+            if (type === 'tEXt' || type === 'iTXt' || type === 'zTXt') {
+                const data = Buffer.alloc(len);
+                fs.readSync(fd, data, 0, len, pos + 8);
+                const nul = data.indexOf(0);
+                if (data.toString('latin1', 0, nul) === 'parameters') {
+                    if (type === 'tEXt') text = data.toString('latin1', nul + 1);
+                    else if (type === 'zTXt') text = require('zlib').inflateSync(data.subarray(nul + 2)).toString('latin1');
+                    else { // iTXt: flag, method, language\0, translated keyword\0, text
+                        const compressed = data[nul + 1] === 1;
+                        let p = data.indexOf(0, nul + 3) + 1;
+                        p = data.indexOf(0, p) + 1;
+                        const body = data.subarray(p);
+                        text = (compressed ? require('zlib').inflateSync(body) : body).toString('utf8');
+                    }
+                    break;
+                }
+            }
+            pos += 12 + len;
+        }
+    } finally {
+        fs.closeSync(fd);
+    }
+    if (!text || !/\bSteps: /.test(text)) return null;
+    const lines = text.split('\n');
+    const last = lines[lines.length - 1];
+    const neg = text.match(/\nNegative prompt: ([\s\S]*?)\n(?=[^\n]*\bSteps: )/);
+    const size = last.match(/\bSize: (\d+)x(\d+)/);
+    const hr = last.match(/\bHires upscale: ([\d.]+)/);
+    return {
+        infotext: text,
+        negative: neg ? neg[1] : '',
+        width: size ? +size[1] : null,
+        height: size ? +size[2] : null,
+        hrScale: hr ? +hr[1] : 1,
+    };
+}
+
 const pct = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
 const down64 = (v) => Math.floor(v / 64) * 64;
 
@@ -106,7 +155,7 @@ function datasetInfo(subsets, resolution) {
     };
 }
 
-module.exports = { imageSize, suggestBuckets, datasetInfo };
+module.exports = { imageSize, forgeSettings, suggestBuckets, datasetInfo };
 
 if (require.main === module) {
     // node lib/datasetinfo.js : checks the bucket rule against the hand-picked settings it was based on

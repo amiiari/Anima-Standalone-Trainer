@@ -2,6 +2,8 @@
 
     python tools/report.py <report.json> <out.png>     (report.json is written by lib/compare.js)
     python tools/report.py --thumbs <image_dir> <out_dir>   256px thumbnails for dataset snapshots
+    python tools/report.py --chart <report.json> <out.png>  just the loss chart
+    python tools/report.py --zip <manifest.json> <out.zip>  zip {arcname: source path}; images/LoRAs stored as-is
 """
 import json
 import os
@@ -149,9 +151,31 @@ def thumbs(src, dst):
             im.save(os.path.join(dst, os.path.splitext(f)[0] + ".jpg"), quality=85)
 
 
+def chart_only(report, out):
+    epochs = report["losses"]["epochs"]
+    img = Image.new("RGB", (1600, 520), BG)
+    d = ImageDraw.Draw(img)
+    d.text((20, 18), f"{report['title']}: loss per epoch", fill=TEXT, font=font(26))
+    img.paste(draw_chart(report["losses"], 1560, 440), (20, 66))
+    img.save(out)
+
+
+def make_zip(manifest, out):
+    import zipfile
+    with zipfile.ZipFile(out + ".part", "w", allowZip64=True) as z:
+        for arc, src in manifest.items():
+            packed = src.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".safetensors"))
+            z.write(src, arc, compress_type=zipfile.ZIP_STORED if packed else zipfile.ZIP_DEFLATED)
+    os.replace(out + ".part", out)
+
+
 if __name__ == "__main__":
     if sys.argv[1] == "--thumbs":
         thumbs(sys.argv[2], sys.argv[3])
+    elif sys.argv[1] in ("--chart", "--zip"):
+        with open(sys.argv[2], encoding="utf-8") as fh:
+            data = json.load(fh)
+        (chart_only if sys.argv[1] == "--chart" else make_zip)(data, sys.argv[3])
     else:
         with open(sys.argv[1], encoding="utf-8") as fh:
             build(json.load(fh), sys.argv[2])

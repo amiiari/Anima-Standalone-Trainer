@@ -11,7 +11,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const TOML = require('@iarna/toml');
 const { readScalars } = require('./tbevents');
-const { datasetInfo } = require('./datasetinfo');
+const { datasetInfo, forgeSettings, imageSize } = require('./datasetinfo');
 
 const IMAGE_EXT = /\.(png|jpe?g|webp)$/i;
 const BASE = '__base__';
@@ -111,6 +111,71 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
         await forge('/sdapi/v1/refresh-loras', {});
     }
 
+    // The model an image's settings were made with, and whether it's the same family as the training base
+    // (Anima). Settings from another family (an SDXL model's sampler/CFG) don't carry over well.
+    const madeWith = (meta) => (meta.infotext.split('\n').pop().match(/\bModel: ([^,]+)/) || [])[1] || null;
+    function sameFamily(meta) {
+        const dit = (getGlobalConfig().model_paths || {}).dit_path;
+        const family = dit ? (path.basename(dit).match(/^[a-z]+/i) || [''])[0].toLowerCase() : '';
+        const model = madeWith(meta);
+        return !family || !model || model.toLowerCase().includes(family);
+    }
+
+    // Dataset samples made with the training base's family (Anima) use their own Forge settings; with no template
+    // set, the first dataset image with settings becomes the template, preferring Anima-made ones.
+    // Returns true if cfg changed.
+    function ensureSettings(job, cfg) {
+        let changed = false;
+        for (const s of cfg.samples) {
+            if (s.kind !== 'dataset' || s.metaChecked) continue;
+            const meta = s.source && fs.existsSync(s.source) ? forgeSettings(s.source) : null;
+            if (meta && sameFamily(meta)) Object.assign(s, { infotext: meta.infotext, negative: s.negative ?? meta.negative });
+            else delete s.infotext;
+            s.metaChecked = true;
+            changed = true;
+        }
+        if (!cfg.template && !cfg.templateSearched) {
+            const candidates = [
+                ...cfg.samples.filter(s => s.source).map(s => s.source),
+                ...subsets(job).filter(sub => fs.existsSync(sub.dir)).flatMap(sub => fs.readdirSync(sub.dir).filter(f => /\.png$/i.test(f)).map(f => path.join(sub.dir, f))),
+            ];
+            const found = candidates.map(f => [f, fs.existsSync(f) && forgeSettings(f)]).filter(([, m]) => m);
+            // exact training base first (anima-base-v1.0 ~ anima_baseV10), then same family, then anything
+            const norm = (t) => (t || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const base = norm(path.basename((getGlobalConfig().model_paths || {}).dit_path || '').replace(/[.][^.]+$/, ''));
+            const [file, meta] = found.find(([, m]) => base && norm(madeWith(m)) === base) || found.find(([, m]) => sameFamily(m)) || found[0] || [];
+            if (file) {
+                fs.mkdirSync(cmpDir(job), { recursive: true });
+                fs.copyFileSync(file, path.join(cmpDir(job), 'template.png'));
+                cfg.template = { ...meta, original: 'template.png', auto: path.basename(file), madeWith: madeWith(meta), otherFamily: !sameFamily(meta) };
+            }
+            cfg.templateSearched = !cfg.template; // don't rescan a dataset with no settings on every refresh
+            changed = true;
+        }
+        return changed;
+    }
+
+    // Size for samples without their own settings: the original's size, before the template's hires upscale
+    // (so the final output matches it), scaled down past ~2.4 MP so a huge source can't run Forge out of memory
+    function sampleSize(job, s, tpl) {
+        const size = imageSize(path.join(cmpDir(job), s.original));
+        if (!size) return null;
+        const hr = tpl?.hrScale || 1;
+        const down = Math.min(1, Math.sqrt(1536 * 1536 / ((size[0] / hr) * (size[1] / hr))));
+        const snap = (v) => Math.max(64, Math.round(v * down / hr / 64) * 64);
+        return [snap(size[0]), snap(size[1])];
+    }
+
+    // Renders use the base model the LoRA was trained on (an image's own settings may name another model)
+    async function trainingBaseModel() {
+        const dit = (getGlobalConfig().model_paths || {}).dit_path;
+        if (!dit) return null;
+        const want = path.basename(dit).replace(/\.[^.]+$/, '').toLowerCase();
+        const models = await forge('/sdapi/v1/sd-models');
+        const m = models.find(m => m.model_name.toLowerCase() === want || path.basename(m.filename || '').replace(/\.[^.]+$/, '').toLowerCase() === want);
+        return m ? m.title : null;
+    }
+
     function renderPath(job, id, ckpt) {
         return path.join(cmpDir(job), 'renders', id, ckpt + '.png');
     }
@@ -153,6 +218,7 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
     async function renderMissing(job, st) {
         const cfg = load(job);
         if (!cfg.samples.length) return;
+        if (ensureSettings(job, cfg)) save(job, cfg);
         const ckpts = checkpoints(job);
         const todo = [];
         for (const s of cfg.samples) {
@@ -172,11 +238,12 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
     }
 
     async function renderAll(job, cfg, todo, st) {
+        const baseModel = await trainingBaseModel().catch(() => null);
         for (const { s, c, out } of todo) {
             if (st.stop) return;
             st.label = `${c.name === BASE ? 'No LoRA' : c.name} · sample ${cfg.samples.indexOf(s) + 1}`;
             const infotext = s.infotext || cfg.template?.infotext;
-            if (!infotext) throw new Error('Dataset samples need a settings template: drop a Forge image on "Settings template" first');
+            if (!infotext) throw new Error('No Forge settings found: none of the dataset images carry them, so drop a Forge image on "Settings template"');
             const body = {
                 infotext,
                 prompt: c.name === BASE ? s.prompt : `${s.prompt} <lora:${c.name}:${cfg.weight}>`,
@@ -185,7 +252,11 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
                 // Forge Neo's infotext parser crashes on list-typed fields, so set those ourselves
                 styles: [], hr_additional_modules: ['Use same choices'],
             };
-            if (s.width) Object.assign(body, { width: s.width, height: s.height });
+            if (!s.infotext) {
+                const size = sampleSize(job, s, cfg.template);
+                if (size) Object.assign(body, { width: size[0], height: size[1] });
+            }
+            if (baseModel) Object.assign(body, { override_settings: { sd_model_checkpoint: baseModel }, override_settings_restore_afterwards: false });
             const r = await forge('/sdapi/v1/txt2img', body);
             fs.mkdirSync(path.dirname(out), { recursive: true });
             fs.writeFileSync(out, Buffer.from(r.images[0], 'base64'));
@@ -375,6 +446,93 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
         return out;
     }
 
+    // ---------- export for the client: viewer.html + renders + LoRAs + charts in one zip ----------
+    const exportState = {}; // job -> { running, error, file }
+
+    function triggerFor(job) {
+        for (const sub of subsets(job)) {
+            const tf = [path.join(sub.dir, 'trigger.txt'), path.join(sub.dir, '..', 'trigger.txt')].find(p => fs.existsSync(p));
+            if (tf) return fs.readFileSync(tf, 'utf8').trim();
+        }
+        return null;
+    }
+
+    async function buildExport(job, { loras }) {
+        const cfg = load(job);
+        const ckpts = checkpoints(job);
+        if (!ckpts.length) throw new Error('No checkpoints to export yet');
+        const name = ckpts[ckpts.length - 1].name.replace(/-\d{6}$/, '');
+        const l = losses(job);
+        const finalEpoch = l.epochs.length ? l.epochs[l.epochs.length - 1].epoch : null;
+        const columns = [{ key: BASE, label: 'No LoRA', epoch: null }, ...ckpts.map(c => ({
+            key: c.name,
+            label: c.epoch != null ? `Epoch ${c.epoch}` : `Final${finalEpoch ? ` (epoch ${finalEpoch})` : ''}`,
+            epoch: c.epoch ?? finalEpoch,
+            file: loras ? `loras/${c.name}.safetensors` : `${c.name}.safetensors`,
+        }))];
+        const root = name; // folder inside the zip
+        const manifest = {};
+        const samples = cfg.samples.map((s, i) => {
+            const dir = `images/${i + 1}`;
+            const orig = `${dir}/original${path.extname(s.original)}`;
+            manifest[`${root}/${orig}`] = path.join(cmpDir(job), s.original);
+            const renders = {};
+            for (const c of columns) {
+                const src = renderPath(job, s.id, c.key);
+                if (!fs.existsSync(src)) continue;
+                const arc = `${dir}/${c.key === BASE ? 'no-lora' : c.key}.png`;
+                manifest[`${root}/${arc}`] = src;
+                renders[c.key] = arc;
+            }
+            return { original: orig, renders, prompt: s.prompt };
+        });
+        if (loras) for (const c of ckpts) manifest[`${root}/loras/${c.name}.safetensors`] = c.file;
+
+        const work = path.join(cmpDir(job), 'export_build');
+        fs.rmSync(work, { recursive: true, force: true });
+        fs.mkdirSync(work, { recursive: true });
+        const trigger = triggerFor(job);
+        const dit = (getGlobalConfig().model_paths || {}).dit_path;
+        const baseModel = dit ? path.basename(dit).replace(/\.[^.]+$/, '') : null;
+        const data = { title: name, trigger, baseModel, weight: cfg.weight, columns, samples, losses: l };
+        const viewer = fs.readFileSync(path.join(__dirname, '..', 'templates', 'viewer.html'), 'utf8')
+            .replace('__DATA__', () => JSON.stringify(data).replace(/</g, '\\u003c')); // a prompt can't close the <script>
+        fs.writeFileSync(path.join(work, 'viewer.html'), viewer);
+        manifest[`${root}/viewer.html`] = path.join(work, 'viewer.html');
+
+        const files = columns.filter(c => c.file).map(c => `  ${c.file.padEnd(44)} ${c.label}`).join('\r\n');
+        fs.writeFileSync(path.join(work, 'README.txt'), [
+            `${name}: LoRA for Anima`,
+            '',
+            trigger ? `Trigger word: ${trigger}  (put it at the start of the prompt)` : null,
+            baseModel ? `Trained on: ${baseModel}` : null,
+            `Example: <lora:${name}:${cfg.weight}>`,
+            '',
+            'viewer.html: open it in a browser to compare every epoch on the same images.',
+            '  Pick an image at the top, move the slider (or the arrow keys) through the epochs,',
+            '  and drag across the picture to wipe between the original and that epoch.',
+            'loss_chart.png: training loss per epoch.',
+            '',
+            loras ? 'LoRA files:' : 'Epochs (LoRA files not included in this zip):',
+            files,
+            '',
+        ].filter(x => x !== null).join('\r\n'));
+        manifest[`${root}/README.txt`] = path.join(work, 'README.txt');
+
+        fs.writeFileSync(path.join(work, 'chart.json'), JSON.stringify({ title: name, losses: l }));
+        await runPython([path.join('tools', 'report.py'), '--chart', path.join(work, 'chart.json'), path.join(work, 'loss_chart.png')]);
+        manifest[`${root}/loss_chart.png`] = path.join(work, 'loss_chart.png');
+        const report = path.join(outDir(job), `${name}_report.png`);
+        if (fs.existsSync(report)) manifest[`${root}/report.png`] = report;
+
+        const out = path.join(jobDir(job), 'export', `${name}.zip`);
+        fs.mkdirSync(path.dirname(out), { recursive: true });
+        fs.writeFileSync(path.join(work, 'manifest.json'), JSON.stringify(manifest));
+        await runPython([path.join('tools', 'report.py'), '--zip', path.join(work, 'manifest.json'), out]);
+        fs.rmSync(work, { recursive: true, force: true });
+        return out;
+    }
+
     // ---------- routes ----------
     const route = (fn) => async (req, res) => {
         try { res.json(await fn(sanitizeName(req.params.name), req.body || {}, req)); } catch (e) { res.status(500).json({ error: e.message }); }
@@ -382,6 +540,7 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
 
     app.get('/api/jobs/:name/compare', route((job) => {
         const cfg = load(job);
+        if (ensureSettings(job, cfg)) save(job, cfg);
         const ckpts = checkpoints(job);
         const renders = {};
         for (const s of cfg.samples) {
@@ -395,6 +554,7 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
             checkpoints: ckpts.map(({ name, epoch }) => ({ name, epoch })),
             renders,
             state: { running: !!st.running || pending.has(job), done: st.done || 0, total: st.total || 0, label: st.label || '', error: st.error || null },
+            export: exportState[job] || null,
         };
     }));
 
@@ -412,6 +572,7 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
             hrScale: +info.parameters['Hires upscale'] || 1, // dataset samples divide by this so the final size matches the original
             original: 'template.png',
         };
+        delete cfg.templateSearched;
         save(job, cfg);
         clearRenders(job);
         return cfg.template;
@@ -429,7 +590,10 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
             const sub = subsets(job)[body.subset];
             const file = path.basename(body.file);
             if (!sub || !fs.existsSync(path.join(sub.dir, file))) throw new Error('Dataset image not found');
-            sample = { id, kind: 'dataset', prompt: readCaption(sub.dir, file, sub.ext), negative: null, width: body.width, height: body.height, original: `originals/${id}${path.extname(file)}`, source: path.join(sub.dir, file) };
+            sample = { id, kind: 'dataset', prompt: readCaption(sub.dir, file, sub.ext), negative: null, original: `originals/${id}${path.extname(file)}`, source: path.join(sub.dir, file) };
+            const meta = forgeSettings(sample.source); // its own Forge settings if made with Anima (caption stays the prompt)
+            if (meta && sameFamily(meta)) Object.assign(sample, { infotext: meta.infotext, negative: meta.negative });
+            sample.metaChecked = true;
             fs.mkdirSync(path.join(cmpDir(job), 'originals'), { recursive: true });
             fs.copyFileSync(sample.source, path.join(cmpDir(job), sample.original));
         }
@@ -465,6 +629,15 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
         if (body.auto !== undefined) cfg.auto = !!body.auto;
         save(job, cfg);
         return cfg;
+    }));
+
+    app.post('/api/jobs/:name/compare/export', route((job, body) => {
+        if (exportState[job]?.running) return exportState[job];
+        exportState[job] = { running: true, error: null, file: null };
+        buildExport(job, { loras: body.loras !== false })
+            .then(file => { exportState[job] = { running: false, error: null, file, dir: path.dirname(file) }; })
+            .catch(e => { exportState[job] = { running: false, error: e.message, file: null }; });
+        return exportState[job];
     }));
 
     app.post('/api/jobs/:name/compare/render', route((job) => { kick(job); return { ok: true }; }));

@@ -42,8 +42,10 @@
         .epochbar input[type=range] { flex: 1; }
         .epochbar .lbl { min-width: 190px; text-align: right; font-variant-numeric: tabular-nums; }
         .wipe { position: relative; user-select: none; cursor: ew-resize; background: var(--bg-tertiary); border-radius: 6px; overflow: hidden; min-height: 300px; display: grid; place-items: center; touch-action: none; }
-        .wipe img { display: block; max-width: 100%; max-height: 62vh; pointer-events: none; }
-        .wipe .right { position: absolute; inset: 0; display: grid; place-items: center; }
+        .wipe .stage { position: relative; display: inline-block; line-height: 0; }
+        .wipe .stage > img { display: block; max-width: 100%; max-height: 62vh; pointer-events: none; }
+        /* the right side covers exactly the left image's box, so both sides line up even if their shapes differ a little */
+        .wipe .stage > .over { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
         .wipe .divider { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 4px rgba(0,0,0,.6); pointer-events: none; }
         .wipe .corner { position: absolute; top: 8px; font-size: 12px; background: rgba(0,0,0,.65); color: #fff; padding: 2px 8px; border-radius: 4px; pointer-events: none; }
         .wipe .empty { color: var(--text-muted); font-size: 13px; padding: 40px; text-align: center; }
@@ -80,6 +82,13 @@
             <button id="stop" class="btn btn-secondary btn-sm">Stop</button>
             <button id="report" class="btn btn-ghost btn-sm" title="Chart + epoch sheet PNG, saved next to the LoRAs (also made automatically when training finishes)">Build report</button>
             <span id="status" class="muted"></span>
+        </div>
+
+        <div class="panel row">
+            <strong>Send to client</strong>
+            <label class="muted"><input id="export-loras" type="checkbox" checked> Include LoRA files</label>
+            <button id="export" class="btn btn-primary btn-sm" title="A zip with viewer.html (this comparison, works offline), the renders, the LoRA files, the loss chart and a README">Export zip</button>
+            <span id="export-status" class="muted"></span>
         </div>
 
         <div class="panel">
@@ -190,13 +199,25 @@
             else say(`${data.checkpoints.length} checkpoint(s)${data.training ? ' · training' : ''}`);
             if (!sel || !data.samples.some(s => s.id === sel)) sel = data.samples[0]?.id || null;
             const tpl = data.template
-                ? `<img src="${file('template.png')}" style="max-height:90px; width:auto; object-fit:contain"><div class="muted">${data.template.width}×${data.template.height}, click/drop to replace</div>`
-                : 'Drop a Forge image (used for dataset samples)';
+                ? `<img src="${file('template.png')}" style="max-height:90px; width:auto; object-fit:contain"><div class="muted">${data.template.auto ? `Auto: settings from ${esc(data.template.auto)}${data.template.madeWith ? ` (${esc(data.template.madeWith)})` : ''}` : `${data.template.width}×${data.template.height}`} · click/drop to replace</div>${data.template.otherFamily ? '<div class="err" style="font-size:12px">Made with a different model family, so its sampler/CFG may not suit Anima: drop an Anima-made image here.</div>' : ''}`
+                : 'No dataset image has Forge settings: drop a Forge image here (used for dataset samples)';
             if ($('template').innerHTML !== tpl) $('template').innerHTML = tpl;
             renderStrip();
             renderSlider();
             renderWipe();
+            const ex = data.export;
+            $('export').disabled = !!ex?.running;
+            $('export-status').innerHTML = !ex ? `${data.samples.length ? '' : 'Add samples first so the viewer has images. '}`
+                : ex.running ? 'Building the zip…'
+                : ex.error ? `<span class="err">${esc(ex.error)}</span>`
+                : `Ready: <code>${esc(ex.file)}</code> <button class="btn btn-ghost btn-sm" id="export-open">Open folder</button>`;
+            $('export-open')?.addEventListener('click', () => api('/api/system/open-folder', 'POST', { path: ex.dir }));
         }
+        $('export').onclick = () => {
+            const missing = data.samples.reduce((n, s) => n + columns().length - (data.renders[s.id] || []).length, 0);
+            if (missing && !confirm(`${missing} render(s) are missing, so some epochs will have no image in the viewer. Export anyway?`)) return;
+            api(`${J}/compare/export`, 'POST', { loras: $('export-loras').checked }).then(refresh).catch(e => say(e.message, true));
+        };
         async function refreshLosses() {
             try { losses = await api(`${J}/losses`); } catch { return; }
             renderChart();
@@ -366,12 +387,11 @@
             const key = `${l}|${r}|${leftName}|${colLabel(rightKey)}`;
             if (key !== lastWipeKey) {
                 lastWipeKey = key;
-                $('wipe').innerHTML = `
-                    ${l ? `<img src="${l}">` : `<div class="empty">${esc(leftName)} not rendered yet</div>`}
-                    <div class="right" id="wr">${r ? `<img src="${r}">` : `<div class="empty">${esc(colLabel(rightKey))} not rendered yet</div>`}</div>
-                    <div class="divider" id="wd"></div>
-                    <span class="corner" style="left:8px">${esc(leftName)}</span>
-                    <span class="corner" style="right:8px">${esc(colLabel(rightKey))}</span>`;
+                // the left image sizes the stage; the right one is laid exactly over it
+                const base = l || r, over = l ? r : null;
+                $('wipe').innerHTML = (base ? `<div class="stage" id="stage"><img src="${base}">${over ? `<img class="over" id="wr" src="${over}"><div class="divider" id="wd"></div>` : ''}</div>` : '')
+                    + (!l || !r ? `<div class="empty">${esc(!r ? colLabel(rightKey) : leftName)} not rendered yet</div>` : '')
+                    + `<span class="corner" style="left:8px">${esc(leftName)}</span><span class="corner" style="right:8px">${esc(colLabel(rightKey))}</span>`;
             }
             placeWipe();
         }
@@ -382,7 +402,7 @@
             wd.style.left = `calc(${wipeAt * 100}% - 1px)`;
         }
         const wipe = $('wipe');
-        const moveWipe = (e) => { const b = wipe.getBoundingClientRect(); wipeAt = Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)); placeWipe(); };
+        const moveWipe = (e) => { const b = ($('stage') || wipe).getBoundingClientRect(); wipeAt = Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)); placeWipe(); };
         wipe.onpointerdown = (e) => { wipe.setPointerCapture(e.pointerId); moveWipe(e); };
         wipe.onpointermove = (e) => { if (e.buttons) moveWipe(e); };
 
