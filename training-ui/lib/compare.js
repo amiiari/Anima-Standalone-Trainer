@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const TOML = require('@iarna/toml');
 const { readScalars } = require('./tbevents');
+const { datasetInfo } = require('./datasetinfo');
 
 const IMAGE_EXT = /\.(png|jpe?g|webp)$/i;
 const BASE = '__base__';
@@ -480,6 +481,11 @@ module.exports = function registerCompare(app, { getJobPath, getGlobalConfig, sa
         const p = path.resolve(root, String(req.query.p || ''));
         if (!p.startsWith(root + path.sep) || !fs.existsSync(p)) return res.status(404).end();
         res.set('Cache-Control', 'no-cache').sendFile(p);
+    });
+
+    // Facts + suggested resolution/buckets for the Dataset tab (takes the folders as currently typed, saved or not)
+    app.post('/api/dataset-info', (req, res) => {
+        try { res.json(datasetInfo(req.body.subsets || [], +req.body.resolution || null)); } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
     app.get('/api/jobs/:name/dataset-images', route((job) => subsets(job).map((s, i) => ({

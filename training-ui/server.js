@@ -942,7 +942,8 @@ function openNative(target, isUrl = false) {
         return;
     }
     if (isWindows) {
-        spawn('explorer', [target]);
+        // explorer ignores forward-slash paths (C:/foo) and opens Documents instead
+        spawn('explorer', [isUrl ? target : path.normalize(target)]);
     } else if (isWSL) {
         let winTarget;
         if (isUrl) {

@@ -645,7 +645,81 @@ function populateDataset(dataset) {
   renderSubsets();
   // Rebuild progressive phase rows now that resolution field is populated
   if ($("cfg-progressive-reso").checked) renderProgressivePhases();
+  loadDatasetInfo();
 }
+// ==========================================
+//  Dataset info: image count, sizes, captions, trigger, suggested resolution/buckets
+// ==========================================
+let datasetInfoSeq = 0;
+async function loadDatasetInfo() {
+  if (!currentJob) return;
+  const seq = ++datasetInfoSeq;
+  const el = $("dataset-info");
+  const res = safeInt(($("cfg-resolution").value || "").split(",")[0]);
+  let info;
+  try {
+    info = await api("/api/dataset-info", {
+      method: "POST",
+      body: {
+        subsets: currentSubsets.filter((s) => !s.is_reg).map((s) => ({
+          dir: (s.image_dir || "").trim(),
+          repeats: safeInt(s.num_repeats, 1),
+          ext: $("cfg-caption-ext").value || ".txt",
+        })),
+        resolution: res,
+      },
+    });
+  } catch (e) {
+    el.innerHTML = `<span class="warn">Couldn't read the dataset: ${escapeHtml(e.message)}</span>`;
+    return;
+  }
+  if (seq !== datasetInfoSeq) return; // a newer refresh is on its way
+  const batch = safeInt(($("cfg-batch-size").value || "4").split(",")[0], 4) || 1;
+  const epochs = safeInt($("cfg-max-epochs").value);
+  const byEpochs = document.querySelector('input[name="duration-unit"]:checked')?.value === "epochs";
+  const steps = Math.ceil(info.imagesPerEpoch / batch);
+  const warn = [];
+  for (const s of info.subsets) {
+    if (!s.exists) { warn.push(`Folder not found: ${s.dir || "(no folder set)"}`); continue; }
+    if (s.missingCaptions.length) warn.push(`${s.missingCaptions.length} image(s) have no caption, e.g. ${s.missingCaptions.slice(0, 3).join(", ")}`);
+    if (s.trigger && s.withTrigger < s.images) warn.push(`${s.images - s.withTrigger} caption(s) don't start with ${s.trigger}`);
+    if (s.unreadable.length) warn.push(`${s.unreadable.length} image(s) whose size couldn't be read`);
+  }
+  if (info.upscaled && !$("cfg-bucket-no-upscale").checked) warn.push(`${info.upscaled} image(s) are smaller than ${res}px and will be upscaled`);
+  const triggers = [...new Set(info.subsets.map((s) => s.trigger).filter(Boolean))];
+  const sg = info.suggested;
+  const current = sg && res === sg.resolution && safeInt($("cfg-min-bucket").value) === sg.min_bucket_reso
+    && safeInt($("cfg-max-bucket").value) === sg.max_bucket_reso && $("cfg-bucket-no-upscale").checked === sg.bucket_no_upscale;
+  const lines = [
+    `<b>${info.images}</b> images · ${info.imagesPerEpoch} per epoch with repeats · ≈${steps} steps per epoch at batch ${batch}` +
+      (byEpochs && epochs ? ` · ≈${steps * epochs} steps total` : ""),
+  ];
+  if (info.images) {
+    lines.push(`<span class="muted">Sizes: median ≈${info.medianSize}px · smallest side ${info.smallestSide}px · width/height ${info.aspect[0].toFixed(2)}–${info.aspect[1].toFixed(2)}</span>`);
+    lines.push(`<span class="muted">Captions: ${info.captions}/${info.images}${triggers.length ? ` · trigger ${escapeHtml(triggers.join(", "))}` : ""} · ${info.uniqueTags} unique tags, ≈${Math.round(info.avgTags)} per image</span>`);
+  }
+  for (const w of warn) lines.push(`<span class="warn">⚠ ${escapeHtml(w)}</span>`);
+  if (sg) {
+    lines.push(`Suggested: resolution <b>${sg.resolution}</b>, buckets <b>${sg.min_bucket_reso}–${sg.max_bucket_reso}</b>` +
+      `${sg.bucket_no_upscale ? ", don't upscale" : ""} ` +
+      (current ? `<span class="muted">(in use)</span>` : `<button class="btn btn-primary btn-sm" id="btn-apply-dataset-suggest">Apply</button>`) +
+      ` <span class="muted" title="Resolution: the long side 75% of the images reach (rounded to 64, max 1216). Max bucket = resolution. Min bucket = resolution × the narrowest image shape (ignoring the oddest 5%). Don't upscale when some images are smaller than the resolution.">ⓘ</span>`);
+  }
+  el.innerHTML = lines.join("<br>");
+  $("btn-apply-dataset-suggest")?.addEventListener("click", () => {
+    $("cfg-resolution").value = String(sg.resolution);
+    $("cfg-min-bucket").value = sg.min_bucket_reso;
+    $("cfg-max-bucket").value = sg.max_bucket_reso;
+    $("cfg-bucket-no-upscale").checked = sg.bucket_no_upscale;
+    $("cfg-enable-bucket").checked = true;
+    checkDirty();
+    loadDatasetInfo();
+  });
+}
+// numbers above depend on these fields: refresh when one of them is changed
+document.addEventListener("change", (e) => {
+  if (e.target.closest("#tab-dataset") || ["cfg-max-epochs", "cfg-batch-size"].includes(e.target.id)) loadDatasetInfo();
+});
 function updateOptimizerOptions() {
   const optimizer = $("cfg-optimizer").value;
   const isProdigy =
