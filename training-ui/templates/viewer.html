@@ -70,6 +70,7 @@
                 <span class="lbl" id="epoch-label"></span>
             </div>
             <div class="wipe" id="wipe"></div>
+            <div class="muted" id="epoch-file" style="margin-top:6px"></div>
             <div class="prompt" id="prompt"></div>
         </div>
         <div class="panel" id="loss-panel">
@@ -129,6 +130,7 @@
             $('epoch').value = col;
             const c = cols[col], e = D.losses.epochs.find(x => x.epoch === c.epoch);
             $('epoch-label').textContent = c.label + (e?.check != null ? ` · check ${e.check.toFixed(4)}` : '') + (c.epoch != null && c.epoch === flattens ? ' ★' : '');
+            $('epoch-file').innerHTML = c.file ? `Like this one? Its LoRA file: <code>${esc(c.file)}</code>` : '';
             const lk = $('left').value, l = src(s, lk), r = src(s, c.key);
             const key = `${sel}|${lk}|${c.key}`;
             if (key !== lastKey) {
